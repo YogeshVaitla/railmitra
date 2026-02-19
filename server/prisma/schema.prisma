@@ -1,0 +1,107 @@
+// Prisma schema for Seat Seeker
+// Currently using SQLite for development. To switch to PostgreSQL:
+// 1. Change provider to "postgresql"
+// 2. Update DATABASE_URL in .env to: postgresql://user:password@localhost:5432/seatseeker
+// All models and queries remain identical.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// MODEL 1: SeatMaster — Static baseline train/coach/seat data
+// ============================================================
+model SeatMaster {
+  id         Int        @id @default(autoincrement())
+  trainNo    String
+  coachId    String
+  seatNo     Int
+  seatType   String     // WINDOW, MIDDLE, AISLE, LOWER, MIDDLE_BERTH, UPPER, SIDE_LOWER, SIDE_UPPER
+  coachType  String     // LHB, ICF, UNKNOWN
+  classType  String     // SL, 3A, 2A, 1A, CC, EC
+
+  reports    SeatReport[]
+
+  @@unique([trainNo, coachId, seatNo])
+  @@index([trainNo])
+  @@index([trainNo, coachId])
+}
+
+// ============================================================
+// MODEL 2: SeatReport — Crowdsourced seat status reports
+// ============================================================
+model SeatReport {
+  id                 Int      @id @default(autoincrement())
+  seatId             Int
+  seat               SeatMaster @relation(fields: [seatId], references: [id])
+  status             String   // EMPTY, OCCUPIED, EXCHANGE_OFFER
+  deviceId           String   // Hashed device identifier
+  gpsLat             Float?
+  gpsLong            Float?
+  verificationMethod String   // GPS_GEOFENCE, PNR_ANCHOR, BLUETOOTH_PEER, MANUAL
+  confidence         Float    @default(0.5) // Computed confidence score
+  timestamp          DateTime @default(now())
+
+  @@index([seatId, timestamp])
+  @@index([deviceId])
+}
+
+// ============================================================
+// MODEL 3: UserReputation — Trust scoring engine
+// ============================================================
+model UserReputation {
+  id              Int      @id @default(autoincrement())
+  deviceId        String   @unique
+  trustScore      Float    @default(0.5) // 0.0 to 1.0
+  totalReports    Int      @default(0)
+  verifiedReports Int      @default(0)
+  streakCount     Int      @default(0) // Consecutive verified reports
+  lastReportAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([trustScore])
+}
+
+// ============================================================
+// MODEL 4: ToiletStatus — Coach toilet conditions
+// ============================================================
+model ToiletStatus {
+  id               Int      @id @default(autoincrement())
+  trainNo          String
+  coachId          String
+  toiletType       String   // WESTERN, INDIAN
+  cleanlinessScore Float    @default(3.0) // 1.0 to 5.0
+  waterAvailable   Boolean  @default(true)
+  queueLength      Int      @default(0) // Inferred from step counters
+  reportedBy       String   // deviceId (hashed)
+  timestamp        DateTime @default(now())
+
+  @@index([trainNo, coachId])
+}
+
+// ============================================================
+// MODEL 5: SwapRequest — P2P seat exchange system
+// ============================================================
+model SwapRequest {
+  id              Int      @id @default(autoincrement())
+  trainNo         String
+  userId          String   // deviceId (hashed)
+  currentCoachId  String
+  currentSeatNo   Int
+  currentSeatType String   // LOWER, UPPER, MIDDLE, WINDOW, AISLE, SIDE_LOWER, SIDE_UPPER
+  desiredSeatType String   // What they want
+  status          String   @default("OPEN") // OPEN, MATCHED, COMPLETED, CANCELLED
+  matchedWith     Int?     // ID of the matched SwapRequest
+  journeyDate     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([trainNo, status])
+  @@index([trainNo, desiredSeatType, status])
+}
