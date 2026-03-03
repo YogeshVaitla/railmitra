@@ -235,7 +235,7 @@ export class MockMeshBridge implements IMeshBridge {
 
 // Server URL — change this to your computer's IP for phone testing
 // e.g. 'http://192.168.1.5:3001' for local network
-const SYNC_SERVER_URL = 'http://192.168.29.121:3001';
+const SYNC_SERVER_URL = 'https://railmitra-api.onrender.com';
 const POLL_INTERVAL_MS = 15000; // Check for new offers every 15 seconds
 
 export class CloudSyncBridge implements IMeshBridge {
