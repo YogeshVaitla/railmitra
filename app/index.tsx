@@ -1,138 +1,68 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
-    View,
-    Text,
-    TextInput,
-    TouchableOpacity,
+    Animated,
+    BackHandler,
+    Dimensions,
+    Modal,
+    Platform,
     ScrollView,
     StyleSheet,
-    Dimensions,
-    Animated,
-    Platform,
-    FlatList,
-    Modal,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import Colors from '../constants/Colors';
-import { getTrainSuggestions, getStationsForTrain, getTrainRunningDays, isUsingLiveAPI } from '../services/apiService';
-import { getRecentSearches, RecentSearch } from '../services/favoritesService';
-import { t, getLanguage, setLanguage, Language, LANGUAGES } from '../services/localization';
-import DatePicker from '../components/DatePicker';
+import { getLanguage, Language, LANGUAGES, setLanguage } from '../services/localization';
+import { getOrCreateDeviceId } from '../services/swapStore';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
+/**
+ * RailMitra V1 — Home Screen
+ * 
+ * Warm light theme, senior-friendly layout.
+ * Big buttons, clear text, spacious cards.
+ */
 export default function HomeScreen() {
-    const [trainNumber, setTrainNumber] = useState('');
-    const [journeyDate, setJourneyDate] = useState('');
-    const [fromStation, setFromStation] = useState('');
-    const [toStation, setToStation] = useState('');
-    const [fromStationName, setFromStationName] = useState('');
-    const [toStationName, setToStationName] = useState('');
-    const [suggestions, setSuggestions] = useState<{ number: string; name: string }[]>([]);
-    const [stations, setStations] = useState<{ code: string; name: string }[]>([]);
-    const [showStationModal, setShowStationModal] = useState<'from' | 'to' | null>(null);
-    const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
     const [lang, setLang] = useState<Language>(getLanguage());
-    const [showSuggestions, setShowSuggestions] = useState(false);
     const [showLangModal, setShowLangModal] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
-    const [runningDays, setRunningDays] = useState<string[] | null>(null);
+    const [deviceId, setDeviceId] = useState('');
     const menuSlide = useState(new Animated.Value(-width))[0];
 
     // Animations
-    const fadeAnim = useState(new Animated.Value(0))[0];
-    const slideAnim = useState(new Animated.Value(50))[0];
-    const logoScale = useState(new Animated.Value(0.5))[0];
+    const fadeIn = useState(new Animated.Value(0))[0];
+    const slideUp = useState(new Animated.Value(30))[0];
+    const heroScale = useState(new Animated.Value(0.9))[0];
+    const stagger1 = useState(new Animated.Value(0))[0];
+    const stagger2 = useState(new Animated.Value(0))[0];
+    const stagger3 = useState(new Animated.Value(0))[0];
 
     useEffect(() => {
+        getOrCreateDeviceId().then(id => setDeviceId(id));
+
         Animated.parallel([
-            Animated.timing(fadeAnim, {
-                toValue: 1,
-                duration: 800,
-                useNativeDriver: true,
-            }),
-            Animated.spring(slideAnim, {
-                toValue: 0,
-                tension: 50,
-                friction: 8,
-                useNativeDriver: true,
-            }),
-            Animated.spring(logoScale, {
-                toValue: 1,
-                tension: 50,
-                friction: 5,
-                useNativeDriver: true,
-            }),
+            Animated.timing(fadeIn, { toValue: 1, duration: 600, useNativeDriver: true }),
+            Animated.spring(slideUp, { toValue: 0, tension: 50, friction: 9, useNativeDriver: true }),
+            Animated.spring(heroScale, { toValue: 1, tension: 40, friction: 7, useNativeDriver: true }),
         ]).start();
 
-        loadRecentSearches();
-
-        // Set default date to today
-        const today = new Date();
-        const formatted = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-        setJourneyDate(formatted);
+        setTimeout(() => Animated.timing(stagger1, { toValue: 1, duration: 350, useNativeDriver: true }).start(), 300);
+        setTimeout(() => Animated.timing(stagger2, { toValue: 1, duration: 350, useNativeDriver: true }).start(), 450);
+        setTimeout(() => Animated.timing(stagger3, { toValue: 1, duration: 350, useNativeDriver: true }).start(), 600);
     }, []);
 
-    const loadRecentSearches = async () => {
-        const searches = await getRecentSearches();
-        setRecentSearches(searches);
-    };
-
-    const handleTrainInput = (text: string) => {
-        setTrainNumber(text);
-        if (text.length >= 2) {
-            const sugg = getTrainSuggestions(text);
-            setSuggestions(sugg);
-            setShowSuggestions(sugg.length > 0);
-        } else {
-            setSuggestions([]);
-            setShowSuggestions(false);
-        }
-    };
-
-    const selectTrain = (number: string) => {
-        setTrainNumber(number);
-        setShowSuggestions(false);
-        const stns = getStationsForTrain(number);
-        setStations(stns);
-        // Get running days for this train
-        const days = getTrainRunningDays(number);
-        setRunningDays(days);
-        // Reset station selections
-        setFromStation('');
-        setToStation('');
-        setFromStationName('');
-        setToStationName('');
-    };
-
-    const selectStation = (code: string, name: string) => {
-        if (showStationModal === 'from') {
-            setFromStation(code);
-            setFromStationName(name);
-        } else {
-            setToStation(code);
-            setToStationName(name);
-        }
-        setShowStationModal(null);
-    };
-
-    const handleSearch = () => {
-        if (!trainNumber || !fromStation || !toStation) return;
-
-        router.push({
-            pathname: '/results',
-            params: {
-                trainNumber,
-                journeyDate,
-                fromStation,
-                toStation,
-                fromStationName,
-                toStationName,
-            },
+    // Android back button exits app from home screen
+    useEffect(() => {
+        const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+            BackHandler.exitApp();
+            return true;
         });
-    };
+        return () => backHandler.remove();
+    }, []);
 
     const selectLanguage = (newLang: Language) => {
         setLanguage(newLang);
@@ -140,387 +70,261 @@ export default function HomeScreen() {
         setShowLangModal(false);
     };
 
-    const clearForm = () => {
-        setTrainNumber('');
-        setSuggestions([]);
-        setShowSuggestions(false);
-        setStations([]);
-        setFromStation('');
-        setToStation('');
-        setFromStationName('');
-        setToStationName('');
-        // Reset date to today
-        const today = new Date();
-        const formatted = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-        setJourneyDate(formatted);
-        setRunningDays(null);
+    const closeMenu = () => {
+        Animated.timing(menuSlide, { toValue: -width, duration: 250, useNativeDriver: true }).start(() => setShowMenu(false));
+    };
+
+    const openMenu = () => {
+        setShowMenu(true);
+        Animated.spring(menuSlide, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
     };
 
     const currentLangOption = LANGUAGES.find(l => l.code === lang) || LANGUAGES[0];
 
-    const handleRecentSearch = (search: RecentSearch) => {
-        router.push({
-            pathname: '/results',
-            params: {
-                trainNumber: search.trainNumber,
-                journeyDate: search.date,
-                fromStation: search.fromStation,
-                toStation: search.toStation,
-                fromStationName: search.fromStationName,
-                toStationName: search.toStationName,
-            },
-        });
-    };
-
-    const isSearchEnabled = trainNumber.length >= 4 && fromStation && toStation;
-
     return (
-        <LinearGradient
-            colors={Colors.background.dark as any}
-            style={styles.container}
-        >
+        <View style={styles.container}>
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
             >
                 {/* Header */}
-                <Animated.View
-                    style={[
-                        styles.header,
-                        {
-                            opacity: fadeAnim,
-                            transform: [{ scale: logoScale }],
-                        },
-                    ]}
-                >
-                    <View style={styles.headerTop}>
-                        <TouchableOpacity
-                            onPress={() => {
-                                setShowMenu(true);
-                                Animated.spring(menuSlide, {
-                                    toValue: 0,
-                                    tension: 65,
-                                    friction: 11,
-                                    useNativeDriver: true,
-                                }).start();
-                            }}
-                            style={styles.hamburgerBtn}
+                <Animated.View style={[styles.header, { opacity: fadeIn }]}>
+                    <TouchableOpacity onPress={openMenu} style={styles.menuBtn}>
+                        <Ionicons name="menu" size={22} color={Colors.text.primary} />
+                    </TouchableOpacity>
+                    <View style={styles.logoRow}>
+                        <LinearGradient
+                            colors={[Colors.primary.start, Colors.primary.end]}
+                            style={styles.logoIcon}
                         >
-                            <Ionicons name="menu" size={24} color="#fff" />
-                        </TouchableOpacity>
-                        <View style={styles.logoContainer}>
-                            <LinearGradient
-                                colors={[Colors.primary.start, Colors.primary.end]}
-                                style={styles.logoIcon}
-                            >
-                                <MaterialCommunityIcons name="train" size={28} color="#fff" />
-                            </LinearGradient>
-                            <View>
-                                <Text style={styles.appName}>{t('appName')}</Text>
-                                <Text style={styles.tagline}>{t('tagline')}</Text>
-                            </View>
-                        </View>
-                        <View style={styles.headerActions}>
-                            <TouchableOpacity onPress={() => setShowLangModal(true)} style={styles.langBtn}>
-                                <Ionicons name="language" size={14} color="rgba(255,255,255,0.7)" />
-                                <Text style={styles.langText}>{currentLangOption.shortLabel}</Text>
-                            </TouchableOpacity>
+                            <MaterialCommunityIcons name="train" size={22} color="#fff" />
+                        </LinearGradient>
+                        <View>
+                            <Text style={styles.appName}>RailMitra</Text>
+                            <Text style={styles.tagline}>Your Train Companion</Text>
                         </View>
                     </View>
+                    <View style={styles.betaBadge}>
+                        <Text style={styles.betaText}>BETA</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setShowLangModal(true)} style={styles.langBtn}>
+                        <Ionicons name="language" size={16} color={Colors.primary.start} />
+                        <Text style={styles.langText}>{currentLangOption.shortLabel}</Text>
+                    </TouchableOpacity>
                 </Animated.View>
 
-                {/* Search Card */}
-                <Animated.View
-                    style={[
-                        styles.searchCard,
-                        {
-                            opacity: fadeAnim,
-                            transform: [{ translateY: slideAnim }],
-                        },
-                    ]}
-                >
+                {/* Hero Card */}
+                <Animated.View style={[styles.heroCard, {
+                    opacity: fadeIn,
+                    transform: [{ scale: heroScale }, { translateY: slideUp }],
+                }]}>
                     <LinearGradient
-                        colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
-                        style={styles.cardGradient}
+                        colors={[Colors.primary.start, Colors.primary.end]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.heroGradient}
                     >
-                        <View style={styles.searchTitleRow}>
-                            <Text style={styles.searchTitle}>{t('searchTitle')}</Text>
-                            <TouchableOpacity onPress={clearForm} style={styles.clearBtn}>
-                                <Ionicons name="refresh" size={14} color="rgba(255,255,255,0.6)" />
-                                <Text style={styles.clearBtnText}>{t('clearAll')}</Text>
-                            </TouchableOpacity>
+                        <View style={styles.heroIconCircle}>
+                            <MaterialCommunityIcons name="swap-horizontal-bold" size={32} color="#fff" />
                         </View>
+                        <Text style={styles.heroTitle}>Exchange Your Berth</Text>
+                        <Text style={styles.heroDesc}>
+                            Find passengers on your train who want to swap seats.{'\n'}Works completely offline!
+                        </Text>
 
-                        {/* Train Number Input */}
-                        <View style={styles.inputContainer}>
-                            <Ionicons name="train-outline" size={20} color={Colors.primary.start} style={styles.inputIcon} />
-                            <TextInput
-                                style={styles.input}
-                                placeholder={t('trainNumberPlaceholder')}
-                                placeholderTextColor="rgba(255,255,255,0.35)"
-                                value={trainNumber}
-                                onChangeText={handleTrainInput}
-                                keyboardType="number-pad"
-                                maxLength={5}
-                            />
-                            {trainNumber.length > 0 && (
-                                <TouchableOpacity onPress={() => { setTrainNumber(''); setSuggestions([]); setStations([]); }}>
-                                    <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.5)" />
-                                </TouchableOpacity>
-                            )}
+                        {/* Stats row */}
+                        <View style={styles.heroStats}>
+                            {[
+                                { emoji: '📡', label: 'P2P Mesh' },
+                                { emoji: '🔒', label: 'No Login' },
+                                { emoji: '📴', label: 'Offline' },
+                            ].map((stat, idx) => (
+                                <React.Fragment key={idx}>
+                                    {idx > 0 && <View style={styles.heroStatDivider} />}
+                                    <View style={styles.heroStat}>
+                                        <Text style={styles.heroStatEmoji}>{stat.emoji}</Text>
+                                        <Text style={styles.heroStatLabel}>{stat.label}</Text>
+                                    </View>
+                                </React.Fragment>
+                            ))}
                         </View>
-
-                        {/* Train Suggestions */}
-                        {showSuggestions && (
-                            <View style={styles.suggestionsContainer}>
-                                {suggestions.map((sugg) => (
-                                    <TouchableOpacity
-                                        key={sugg.number}
-                                        style={styles.suggestionItem}
-                                        onPress={() => selectTrain(sugg.number)}
-                                    >
-                                        <MaterialCommunityIcons name="train" size={16} color={Colors.primary.start} />
-                                        <Text style={styles.suggestionNumber}>{sugg.number}</Text>
-                                        <Text style={styles.suggestionName} numberOfLines={1}>{sugg.name}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        )}
-
-                        {/* Journey Date */}
-                        <DatePicker
-                            value={journeyDate}
-                            onChange={setJourneyDate}
-                            label={t('journeyDate')}
-                            runningDays={runningDays}
-                        />
-
-                        {/* Station Selection */}
-                        <View style={styles.stationRow}>
-                            <TouchableOpacity
-                                style={[styles.stationInput, !stations.length && styles.stationInputDisabled]}
-                                onPress={() => stations.length > 0 && setShowStationModal('from')}
-                                disabled={!stations.length}
-                            >
-                                <View style={styles.stationDot}>
-                                    <View style={[styles.dot, { backgroundColor: Colors.success.end }]} />
-                                </View>
-                                <View style={styles.stationTextContainer}>
-                                    <Text style={styles.stationLabel}>{t('fromStation')}</Text>
-                                    <Text style={styles.stationValue} numberOfLines={1}>
-                                        {fromStation ? `${fromStation} - ${fromStationName}` : t('selectStation')}
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-
-                            {/* Swap Button */}
-                            <TouchableOpacity
-                                style={styles.swapBtn}
-                                onPress={() => {
-                                    const tempCode = fromStation;
-                                    const tempName = fromStationName;
-                                    setFromStation(toStation);
-                                    setFromStationName(toStationName);
-                                    setToStation(tempCode);
-                                    setToStationName(tempName);
-                                }}
-                            >
-                                <Ionicons name="swap-vertical" size={20} color="#fff" />
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[styles.stationInput, !stations.length && styles.stationInputDisabled]}
-                                onPress={() => stations.length > 0 && setShowStationModal('to')}
-                                disabled={!stations.length}
-                            >
-                                <View style={styles.stationDot}>
-                                    <View style={[styles.dot, { backgroundColor: Colors.danger.end }]} />
-                                </View>
-                                <View style={styles.stationTextContainer}>
-                                    <Text style={styles.stationLabel}>{t('toStation')}</Text>
-                                    <Text style={styles.stationValue} numberOfLines={1}>
-                                        {toStation ? `${toStation} - ${toStationName}` : t('selectStation')}
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Search Button */}
-                        <TouchableOpacity
-                            onPress={handleSearch}
-                            disabled={!isSearchEnabled}
-                            activeOpacity={0.8}
-                        >
-                            <LinearGradient
-                                colors={
-                                    isSearchEnabled
-                                        ? [Colors.primary.start, Colors.primary.end]
-                                        : ['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']
-                                }
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                                style={[styles.searchButton, !isSearchEnabled && styles.searchButtonDisabled]}
-                            >
-                                <Ionicons name="search" size={20} color="#fff" />
-                                <Text style={styles.searchButtonText}>{t('search')}</Text>
-                            </LinearGradient>
-                        </TouchableOpacity>
                     </LinearGradient>
                 </Animated.View>
 
-                {/* Language Picker Modal */}
-                <Modal
-                    visible={showLangModal}
-                    transparent
-                    animationType="fade"
-                    onRequestClose={() => setShowLangModal(false)}
+                {/* Main CTA */}
+                <TouchableOpacity
+                    onPress={() => router.push('/swap')}
+                    activeOpacity={0.85}
+                    style={styles.ctaWrapper}
                 >
-                    <TouchableOpacity
-                        style={styles.langModalOverlay}
-                        activeOpacity={1}
-                        onPress={() => setShowLangModal(false)}
+                    <LinearGradient
+                        colors={[Colors.primary.start, Colors.primary.end]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.ctaButton}
                     >
-                        <TouchableOpacity activeOpacity={1} onPress={() => { }}>
-                            <View style={styles.langModalContent}>
-                                <LinearGradient
-                                    colors={['#1a1640', '#2d2460', '#1a1640']}
-                                    style={styles.langModalGradient}
-                                >
-                                    <View style={styles.langModalHeader}>
-                                        <Ionicons name="language" size={20} color={Colors.primary.start} />
-                                        <Text style={styles.langModalTitle}>Select Language</Text>
-                                    </View>
-                                    {LANGUAGES.map((langOption) => (
-                                        <TouchableOpacity
-                                            key={langOption.code}
-                                            style={[
-                                                styles.langOption,
-                                                lang === langOption.code && styles.langOptionActive,
-                                            ]}
-                                            onPress={() => selectLanguage(langOption.code)}
-                                        >
-                                            <View style={styles.langOptionLeft}>
-                                                <Text style={styles.langOptionShort}>{langOption.shortLabel}</Text>
-                                                <View>
-                                                    <Text style={styles.langOptionName}>{langOption.nativeName}</Text>
-                                                    <Text style={styles.langOptionEnName}>{langOption.name}</Text>
-                                                </View>
-                                            </View>
-                                            {lang === langOption.code && (
-                                                <Ionicons name="checkmark-circle" size={22} color={Colors.primary.start} />
-                                            )}
-                                        </TouchableOpacity>
-                                    ))}
-                                </LinearGradient>
-                            </View>
-                        </TouchableOpacity>
-                    </TouchableOpacity>
-                </Modal>
+                        <MaterialCommunityIcons name="swap-horizontal-bold" size={20} color="#fff" />
+                        <Text style={styles.ctaText}>Start Swapping</Text>
+                        <Ionicons name="arrow-forward" size={18} color="#fff" />
+                    </LinearGradient>
+                </TouchableOpacity>
 
-                {/* Quick Tips */}
-                <Animated.View style={[styles.tipsContainer, { opacity: fadeAnim }]}>
-                    <View style={styles.tipCard}>
-                        <LinearGradient
-                            colors={[Colors.success.start, Colors.success.end]}
-                            style={styles.tipIconBg}
-                        >
-                            <Ionicons name="information-circle" size={18} color="#fff" />
-                        </LinearGradient>
-                        <View style={styles.tipContent}>
-                            <Text style={styles.tipTitle}>How it works</Text>
-                            <Text style={styles.tipText}>
-                                Charts are prepared ~4 hours before departure. Enter your train details to see vacant seats after chart preparation.
-                            </Text>
-                        </View>
+                {/* Feature Cards */}
+                <Animated.View style={[styles.featureCard, { opacity: stagger1 }]}>
+                    <View style={[styles.featureIconBox, { backgroundColor: Colors.success.light }]}>
+                        <MaterialCommunityIcons name="graph" size={22} color={Colors.success.start} />
+                    </View>
+                    <View style={styles.featureContent}>
+                        <Text style={styles.featureTitle}>Smart Matching</Text>
+                        <Text style={styles.featureDesc}>
+                            Graph algorithm finds optimal swap cycles — even multi-party chains.
+                        </Text>
                     </View>
                 </Animated.View>
 
-                {/* Recent Searches */}
-                {recentSearches.length > 0 && (
-                    <Animated.View style={[styles.recentContainer, { opacity: fadeAnim }]}>
-                        <Text style={styles.sectionTitle}>{t('recentSearches')}</Text>
-                        {recentSearches.slice(0, 5).map((search, idx) => (
-                            <TouchableOpacity
-                                key={`${search.trainNumber}-${idx}`}
-                                style={styles.recentItem}
-                                onPress={() => handleRecentSearch(search)}
-                            >
-                                <LinearGradient
-                                    colors={[Colors.primary.start, Colors.primary.end]}
-                                    style={styles.recentIcon}
-                                >
-                                    <Ionicons name="time-outline" size={16} color="#fff" />
-                                </LinearGradient>
-                                <View style={styles.recentInfo}>
-                                    <Text style={styles.recentTrain}>{search.trainNumber} - {search.trainName}</Text>
-                                    <Text style={styles.recentRoute}>
-                                        {search.fromStationName} → {search.toStationName}
-                                    </Text>
-                                </View>
-                                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
-                            </TouchableOpacity>
-                        ))}
-                    </Animated.View>
-                )}
+                <Animated.View style={[styles.featureCard, { opacity: stagger2 }]}>
+                    <View style={[styles.featureIconBox, { backgroundColor: Colors.accent.light }]}>
+                        <Ionicons name="accessibility" size={22} color={Colors.accent.start} />
+                    </View>
+                    <View style={styles.featureContent}>
+                        <Text style={styles.featureTitle}>Priority for Seniors</Text>
+                        <Text style={styles.featureDesc}>
+                            Elderly and medical passengers get automatic priority in swap matching.
+                        </Text>
+                    </View>
+                </Animated.View>
 
-                {/* Demo trains hint */}
-                <View style={styles.demoHint}>
-                    <Ionicons name="bulb-outline" size={16} color={Colors.warning.start} />
-                    <Text style={styles.demoHintText}>
-                        Try trains: 12301, 12951, 12003, 12049, 12259
+                <Animated.View style={[styles.featureCard, { opacity: stagger3 }]}>
+                    <View style={[styles.featureIconBox, { backgroundColor: Colors.primary.light }]}>
+                        <MaterialCommunityIcons name="shield-check" size={22} color={Colors.primary.start} />
+                    </View>
+                    <View style={styles.featureContent}>
+                        <Text style={styles.featureTitle}>Privacy First</Text>
+                        <Text style={styles.featureDesc}>
+                            No accounts, no personal data. Swap data stays on your phone.
+                        </Text>
+                    </View>
+                </Animated.View>
+
+                {/* How It Works */}
+                <View style={styles.howSection}>
+                    <Text style={styles.sectionTitle}>How It Works</Text>
+                    {[
+                        { step: '1', text: 'Enter your train number' },
+                        { step: '2', text: 'Browse swap offers from nearby passengers' },
+                        { step: '3', text: 'Register your offer or accept a match' },
+                        { step: '4', text: 'Walk to the seat and swap!' },
+                    ].map((item, idx) => (
+                        <View key={idx} style={styles.howStep}>
+                            <LinearGradient
+                                colors={[Colors.primary.start, Colors.primary.end]}
+                                style={styles.howStepBadge}
+                            >
+                                <Text style={styles.howStepNum}>{item.step}</Text>
+                            </LinearGradient>
+                            <Text style={styles.howStepText}>{item.text}</Text>
+                        </View>
+                    ))}
+                </View>
+
+                {/* Coming Soon */}
+                <View style={styles.comingSoon}>
+                    <Text style={styles.comingSoonTitle}>COMING SOON</Text>
+                    <View style={styles.comingSoonGrid}>
+                        {[
+                            { icon: 'ticket-confirmation-outline', label: 'PNR Tracking' },
+                            { icon: 'seat-passenger', label: 'Seat Availability' },
+                            { icon: 'train-car', label: 'Live Status' },
+                            { icon: 'toilet', label: 'Coach Conditions' },
+                        ].map((item, idx) => (
+                            <View key={idx} style={styles.comingSoonItem}>
+                                <MaterialCommunityIcons name={item.icon as any} size={18} color={Colors.text.tertiary} />
+                                <Text style={styles.comingSoonLabel}>{item.label}</Text>
+                            </View>
+                        ))}
+                    </View>
+                </View>
+
+                {/* Device footer */}
+                <View style={styles.deviceFooter}>
+                    <Ionicons name="finger-print" size={13} color={Colors.text.tertiary} />
+                    <Text style={styles.deviceText}>
+                        Device: {deviceId ? `${deviceId.substring(0, 8)}...` : 'Loading'}
                     </Text>
                 </View>
             </ScrollView>
 
-            {/* Hamburger Side Menu */}
+            {/* Language Modal */}
+            <Modal visible={showLangModal} transparent animationType="fade" onRequestClose={() => setShowLangModal(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowLangModal(false)}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => { }}>
+                        <View style={styles.langModalContent}>
+                            <View style={styles.langModalHeader}>
+                                <Ionicons name="language" size={20} color={Colors.primary.start} />
+                                <Text style={styles.langModalTitle}>Select Language</Text>
+                            </View>
+                            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                                {LANGUAGES.map((langOption) => (
+                                    <TouchableOpacity
+                                        key={langOption.code}
+                                        style={[styles.langOption, lang === langOption.code && styles.langOptionActive]}
+                                        onPress={() => selectLanguage(langOption.code)}
+                                    >
+                                        <View style={styles.langOptionLeft}>
+                                            <View style={[styles.langShortBadge, lang === langOption.code && styles.langShortBadgeActive]}>
+                                                <Text style={[styles.langShortText, lang === langOption.code && styles.langShortTextActive]}>
+                                                    {langOption.shortLabel}
+                                                </Text>
+                                            </View>
+                                            <View>
+                                                <Text style={styles.langOptionName}>{langOption.nativeName}</Text>
+                                                <Text style={styles.langOptionEnName}>{langOption.name}</Text>
+                                            </View>
+                                        </View>
+                                        {lang === langOption.code && (
+                                            <Ionicons name="checkmark-circle" size={22} color={Colors.primary.start} />
+                                        )}
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    </TouchableOpacity>
+                </TouchableOpacity>
+            </Modal>
+
+            {/* Side Menu */}
             <Modal
                 visible={showMenu}
                 transparent
                 animationType="none"
-                onRequestClose={() => {
-                    Animated.timing(menuSlide, { toValue: -width, duration: 250, useNativeDriver: true }).start(() => setShowMenu(false));
-                }}
+                onRequestClose={closeMenu}
             >
                 <View style={styles.menuOverlay}>
-                    <TouchableOpacity
-                        style={styles.menuBackdrop}
-                        activeOpacity={1}
-                        onPress={() => {
-                            Animated.timing(menuSlide, { toValue: -width, duration: 250, useNativeDriver: true }).start(() => setShowMenu(false));
-                        }}
-                    />
+                    <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={closeMenu} />
                     <Animated.View style={[styles.menuDrawer, { transform: [{ translateX: menuSlide }] }]}>
-                        <LinearGradient
-                            colors={Colors.background.dark as any}
-                            style={styles.menuGradient}
-                        >
+                        <View style={styles.menuContainer}>
+                            {/* Menu Header */}
                             <View style={styles.menuHeader}>
                                 <View style={styles.menuLogoRow}>
-                                    <LinearGradient
-                                        colors={[Colors.primary.start, Colors.primary.end]}
-                                        style={styles.menuLogoIcon}
-                                    >
-                                        <MaterialCommunityIcons name="train" size={20} color="#fff" />
+                                    <LinearGradient colors={[Colors.primary.start, Colors.primary.end]} style={styles.menuLogoIcon}>
+                                        <MaterialCommunityIcons name="train" size={18} color="#fff" />
                                     </LinearGradient>
-                                    <Text style={styles.menuLogoText}>{t('appName')}</Text>
+                                    <Text style={styles.menuLogoText}>RailMitra</Text>
                                 </View>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        Animated.timing(menuSlide, { toValue: -width, duration: 250, useNativeDriver: true }).start(() => setShowMenu(false));
-                                    }}
-                                >
-                                    <Ionicons name="close" size={24} color="rgba(255,255,255,0.6)" />
+                                <TouchableOpacity onPress={closeMenu} style={styles.menuCloseBtn}>
+                                    <Ionicons name="close" size={22} color={Colors.text.secondary} />
                                 </TouchableOpacity>
                             </View>
 
+                            {/* Menu Items */}
                             <View style={styles.menuItems}>
                                 {[
-                                    { icon: 'ticket-confirmation-outline', label: 'PNR Search', sub: 'Track PNR & vacancy', route: '/pnr', colors: [Colors.primary.start, Colors.primary.end], ionicon: false },
-                                    { icon: 'swap-horizontal-bold', label: 'Seat Swap', sub: 'Exchange berths P2P', route: '/swap', colors: [Colors.accent.start, Colors.accent.end], ionicon: false },
-                                    { icon: 'toilet', label: 'Toilet Status', sub: 'Coach conditions', route: '/toilets', colors: [Colors.success.start, Colors.success.end], ionicon: false },
-                                    { icon: 'star-outline', label: 'Favorites', sub: 'Saved routes', route: '/favorites', colors: [Colors.warning.start, Colors.warning.end], ionicon: true },
-                                    { icon: 'cog-outline', label: 'Settings', sub: 'App preferences', route: '/settings', colors: ['#8B8B9E', '#6C6C80'], ionicon: true },
+                                    { icon: 'swap-horizontal-bold', label: 'Seat Swap', sub: 'Exchange berths P2P', route: '/swap', color: Colors.primary.start, ionicon: false },
+                                    { icon: 'time-outline', label: 'Swap History', sub: 'Your past swaps', route: '/history', color: Colors.accent.start, ionicon: true },
+                                    { icon: 'information-circle-outline', label: 'About', sub: 'About this app', route: '/about', color: Colors.text.tertiary, ionicon: true },
+                                    { icon: 'shield-checkmark-outline', label: 'Privacy Policy', sub: 'How we protect you', route: '/privacy', color: Colors.success.start, ionicon: true },
+                                    { icon: 'document-text-outline', label: 'Terms of Use', sub: 'Usage terms', route: '/terms', color: Colors.text.tertiary, ionicon: true },
+                                    { icon: 'cog-outline', label: 'Settings', sub: 'App preferences', route: '/settings', color: Colors.text.tertiary, ionicon: true },
                                 ].map((item) => (
                                     <TouchableOpacity
                                         key={item.route}
@@ -533,647 +337,250 @@ export default function HomeScreen() {
                                             });
                                         }}
                                     >
-                                        <LinearGradient
-                                            colors={item.colors as any}
-                                            style={styles.menuItemIcon}
-                                        >
+                                        <View style={[styles.menuItemIconBox, { backgroundColor: `${item.color}15` }]}>
                                             {item.ionicon ? (
-                                                <Ionicons name={item.icon as any} size={20} color="#fff" />
+                                                <Ionicons name={item.icon as any} size={20} color={item.color} />
                                             ) : (
-                                                <MaterialCommunityIcons name={item.icon as any} size={20} color="#fff" />
+                                                <MaterialCommunityIcons name={item.icon as any} size={20} color={item.color} />
                                             )}
-                                        </LinearGradient>
-                                        <View style={styles.menuItemText}>
+                                        </View>
+                                        <View style={styles.menuItemTextBox}>
                                             <Text style={styles.menuItemLabel}>{item.label}</Text>
                                             <Text style={styles.menuItemSub}>{item.sub}</Text>
                                         </View>
-                                        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.25)" />
+                                        <Ionicons name="chevron-forward" size={16} color={Colors.divider} />
                                     </TouchableOpacity>
                                 ))}
                             </View>
 
+                            {/* Menu Footer */}
                             <View style={styles.menuFooter}>
-                                <View style={styles.menuDataBadge}>
-                                    <View style={[styles.dataSourceDot, { backgroundColor: isUsingLiveAPI() ? Colors.vacant : Colors.rac }]} />
-                                    <Text style={styles.menuDataText}>{isUsingLiveAPI() ? 'Connected to Live API' : 'Using Mock Data'}</Text>
-                                </View>
+                                <Text style={styles.menuFooterText}>v1.0 · Offline-First</Text>
                             </View>
-                        </LinearGradient>
+                        </View>
                     </Animated.View>
                 </View>
             </Modal>
-
-            {/* Station Selection Modal */}
-            <Modal
-                visible={showStationModal !== null}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowStationModal(null)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <LinearGradient
-                            colors={Colors.background.dark as any}
-                            style={styles.modalGradient}
-                        >
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>
-                                    {showStationModal === 'from' ? t('fromStation') : t('toStation')}
-                                </Text>
-                                <TouchableOpacity onPress={() => setShowStationModal(null)}>
-                                    <Ionicons name="close" size={24} color="#fff" />
-                                </TouchableOpacity>
-                            </View>
-                            <FlatList
-                                data={stations}
-                                keyExtractor={(item) => item.code}
-                                renderItem={({ item }) => (
-                                    <TouchableOpacity
-                                        style={styles.modalItem}
-                                        onPress={() => selectStation(item.code, item.name)}
-                                    >
-                                        <View style={styles.modalItemLeft}>
-                                            <Text style={styles.modalItemCode}>{item.code}</Text>
-                                            <Text style={styles.modalItemName}>{item.name}</Text>
-                                        </View>
-                                        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
-                                    </TouchableOpacity>
-                                )}
-                            />
-                        </LinearGradient>
-                    </View>
-                </View>
-            </Modal>
-        </LinearGradient>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
+    container: { flex: 1, backgroundColor: Colors.background.primary },
     scrollContent: {
-        paddingTop: Platform.OS === 'ios' ? 60 : 45,
-        paddingBottom: 40,
-        paddingHorizontal: 20,
+        paddingTop: Platform.OS === 'ios' ? 58 : 42,
+        paddingBottom: 40, paddingHorizontal: 20,
     },
+
+    // Header
     header: {
-        marginBottom: 24,
+        flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'space-between', marginBottom: 22,
     },
-    headerTop: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
+    menuBtn: {
+        width: 44, height: 44, borderRadius: 14,
+        backgroundColor: Colors.card.background,
+        justifyContent: 'center', alignItems: 'center',
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1, shadowRadius: 6, elevation: 3,
     },
-    logoContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        flex: 1,
-    },
+    logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, paddingLeft: 12 },
     logoIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 40, height: 40, borderRadius: 12,
+        justifyContent: 'center', alignItems: 'center',
     },
-    appName: {
-        fontSize: 20,
-        fontWeight: '800',
-        color: '#fff',
-        letterSpacing: 0.5,
-    },
+    appName: { fontSize: 20, fontWeight: '800', color: Colors.text.primary },
     tagline: {
-        fontSize: 12,
-        color: 'rgba(255,255,255,0.6)',
-        letterSpacing: 1,
-        textTransform: 'uppercase',
+        fontSize: 11, color: Colors.text.tertiary,
+        letterSpacing: 1, textTransform: 'uppercase', marginTop: 1,
+    },
+    betaBadge: {
+        backgroundColor: Colors.warning.light,
+        paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+        marginRight: 6,
+    },
+    betaText: {
+        color: Colors.warning.start, fontSize: 10, fontWeight: '800', letterSpacing: 1,
     },
     langBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 5,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.15)',
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        backgroundColor: Colors.primary.light, borderRadius: 12,
+        paddingHorizontal: 12, paddingVertical: 8,
     },
-    langText: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '700',
+    langText: { color: Colors.primary.start, fontSize: 14, fontWeight: '700' },
+
+    // Hero
+    heroCard: { borderRadius: 20, overflow: 'hidden', marginBottom: 16 },
+    heroGradient: { padding: 24, alignItems: 'center' },
+    heroIconCircle: {
+        width: 64, height: 64, borderRadius: 32,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        justifyContent: 'center', alignItems: 'center',
+        marginBottom: 14,
     },
-    headerActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        flexShrink: 0,
+    heroTitle: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 8, textAlign: 'center' },
+    heroDesc: {
+        color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 21,
+        textAlign: 'center', marginBottom: 18,
     },
-    settingsBtn: {
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 12,
-        width: 38,
-        height: 38,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.15)',
+    heroStats: {
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: 12,
+        paddingVertical: 12, paddingHorizontal: 16, width: '100%',
     },
-    searchCard: {
-        borderRadius: 20,
-        overflow: 'hidden',
-        marginBottom: 20,
-        borderWidth: 1,
-        borderColor: Colors.glass.border,
+    heroStat: { flex: 1, alignItems: 'center', gap: 3 },
+    heroStatEmoji: { fontSize: 18 },
+    heroStatLabel: {
+        color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600', textAlign: 'center',
     },
-    cardGradient: {
+    heroStatDivider: {
+        width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.15)', marginHorizontal: 4,
+    },
+
+    // CTA
+    ctaWrapper: { marginBottom: 22 },
+    ctaButton: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+        paddingVertical: 16, borderRadius: 16, gap: 10,
+        shadowColor: Colors.primary.start, shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
+    },
+    ctaText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+
+    // Features
+    featureCard: {
+        flexDirection: 'row', alignItems: 'flex-start', gap: 14,
+        backgroundColor: Colors.card.background, borderRadius: 16,
+        padding: 16, marginBottom: 10,
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1, shadowRadius: 8, elevation: 2,
+    },
+    featureIconBox: {
+        width: 44, height: 44, borderRadius: 13,
+        justifyContent: 'center', alignItems: 'center',
+    },
+    featureContent: { flex: 1 },
+    featureTitle: { color: Colors.text.primary, fontSize: 15, fontWeight: '700', marginBottom: 3 },
+    featureDesc: { color: Colors.text.secondary, fontSize: 13, lineHeight: 19 },
+
+    // How it works
+    howSection: {
+        marginTop: 14, marginBottom: 18,
+        backgroundColor: Colors.card.background, borderRadius: 18,
         padding: 20,
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1, shadowRadius: 8, elevation: 2,
     },
-    searchTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#fff',
+    sectionTitle: { color: Colors.text.primary, fontSize: 17, fontWeight: '700', marginBottom: 16 },
+    howStep: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
+    howStepBadge: {
+        width: 30, height: 30, borderRadius: 15,
+        justifyContent: 'center', alignItems: 'center',
     },
-    searchTitleRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 18,
+    howStepNum: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    howStepText: { color: Colors.text.secondary, fontSize: 14, flex: 1, lineHeight: 20 },
+
+    // Coming Soon
+    comingSoon: {
+        backgroundColor: Colors.background.tertiary, borderRadius: 16,
+        padding: 18, marginBottom: 16,
     },
-    clearBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
+    comingSoonTitle: {
+        color: Colors.text.tertiary, fontSize: 11, fontWeight: '700',
+        letterSpacing: 1.5, marginBottom: 12,
     },
-    clearBtnText: {
-        color: 'rgba(255,255,255,0.6)',
-        fontSize: 12,
-        fontWeight: '600',
+    comingSoonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    comingSoonItem: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        backgroundColor: Colors.card.background, borderRadius: 10,
+        paddingHorizontal: 12, paddingVertical: 10,
     },
-    inputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.07)',
-        borderRadius: 14,
-        paddingHorizontal: 14,
-        marginBottom: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        height: 52,
+    comingSoonLabel: { color: Colors.text.tertiary, fontSize: 12, fontWeight: '600' },
+
+    // Device footer
+    deviceFooter: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+        gap: 6, paddingVertical: 10,
     },
-    inputIcon: {
-        marginRight: 10,
-    },
-    input: {
-        flex: 1,
-        color: '#fff',
-        fontSize: 16,
-        height: 52,
-    },
-    suggestionsContainer: {
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        borderRadius: 12,
-        marginBottom: 12,
-        marginTop: -8,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
-    suggestionItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.05)',
-        gap: 8,
-    },
-    suggestionNumber: {
-        color: '#fff',
-        fontWeight: '700',
-        fontSize: 14,
-        minWidth: 50,
-    },
-    suggestionName: {
-        color: 'rgba(255,255,255,0.7)',
-        fontSize: 13,
-        flex: 1,
-    },
-    stationRow: {
-        gap: 8,
-        marginBottom: 16,
-    },
-    stationInput: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.07)',
-        borderRadius: 14,
-        paddingHorizontal: 14,
-        paddingVertical: 14,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-    },
-    stationInputDisabled: {
-        opacity: 0.4,
-    },
-    stationDot: {
-        marginRight: 12,
-    },
-    dot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-    },
-    stationTextContainer: {
-        flex: 1,
-    },
-    stationLabel: {
-        fontSize: 11,
-        color: 'rgba(255,255,255,0.5)',
-        textTransform: 'uppercase',
-        letterSpacing: 1,
-        marginBottom: 2,
-    },
-    stationValue: {
-        fontSize: 15,
-        color: '#fff',
-        fontWeight: '600',
-    },
-    swapBtn: {
-        alignSelf: 'center',
-        backgroundColor: Colors.primary.start,
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginVertical: -4,
-        zIndex: 1,
-    },
-    searchButton: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingVertical: 16,
-        borderRadius: 14,
-        gap: 8,
-    },
-    searchButtonDisabled: {
-        opacity: 0.5,
-    },
-    searchButtonText: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: '700',
-        letterSpacing: 0.5,
-    },
-    tipsContainer: {
-        marginBottom: 20,
-    },
-    tipCard: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        borderRadius: 14,
-        padding: 14,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        gap: 12,
-    },
-    tipIconBg: {
-        width: 32,
-        height: 32,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    tipContent: {
-        flex: 1,
-    },
-    tipTitle: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '700',
-        marginBottom: 4,
-    },
-    tipText: {
-        color: 'rgba(255,255,255,0.6)',
-        fontSize: 12,
-        lineHeight: 18,
-    },
-    recentContainer: {
-        marginBottom: 20,
-    },
-    sectionTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#fff',
-        marginBottom: 12,
-    },
-    recentItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 8,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.06)',
-        gap: 12,
-    },
-    recentIcon: {
-        width: 32,
-        height: 32,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    recentInfo: {
-        flex: 1,
-    },
-    recentTrain: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    recentRoute: {
-        color: 'rgba(255,255,255,0.5)',
-        fontSize: 12,
-        marginTop: 2,
-    },
-    demoHint: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        marginTop: 8,
-        paddingVertical: 12,
-        backgroundColor: 'rgba(242, 201, 76, 0.08)',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(242, 201, 76, 0.15)',
-    },
-    demoHintText: {
-        color: Colors.warning.start,
-        fontSize: 13,
-        fontWeight: '500',
-    },
-    // Modal
+    deviceText: { color: Colors.text.tertiary, fontSize: 11 },
+
+    // Language Modal
     modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        justifyContent: 'flex-end',
-    },
-    modalContent: {
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        overflow: 'hidden',
-        maxHeight: height * 0.6,
-    },
-    modalGradient: {
-        padding: 20,
-    },
-    modalHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    modalTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#fff',
-    },
-    modalItem: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.06)',
-    },
-    modalItemLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-    },
-    modalItemCode: {
-        color: Colors.primary.start,
-        fontSize: 15,
-        fontWeight: '800',
-        minWidth: 48,
-    },
-    modalItemName: {
-        color: '#fff',
-        fontSize: 15,
-    },
-    // Language picker modal
-    langModalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.75)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20,
+        flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
+        justifyContent: 'center', alignItems: 'center', padding: 24,
     },
     langModalContent: {
-        borderRadius: 20,
-        overflow: 'hidden',
-        width: width - 50,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
-    },
-    langModalGradient: {
-        padding: 20,
+        backgroundColor: Colors.card.background, borderRadius: 20,
+        width: width - 48, maxWidth: 380, padding: 20,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.15, shadowRadius: 24, elevation: 10,
     },
     langModalHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        marginBottom: 16,
-        paddingBottom: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.08)',
+        flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16,
     },
-    langModalTitle: {
-        color: '#fff',
-        fontSize: 17,
-        fontWeight: '700',
-    },
+    langModalTitle: { color: Colors.text.primary, fontSize: 18, fontWeight: '700' },
     langOption: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 12,
-        paddingHorizontal: 10,
-        borderRadius: 12,
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+        paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12,
         marginBottom: 4,
     },
-    langOptionActive: {
-        backgroundColor: 'rgba(102, 126, 234, 0.12)',
-        borderWidth: 1,
-        borderColor: 'rgba(102, 126, 234, 0.2)',
+    langOptionActive: { backgroundColor: Colors.primary.light },
+    langOptionLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    langShortBadge: {
+        width: 36, height: 36, borderRadius: 10,
+        backgroundColor: Colors.background.tertiary,
+        justifyContent: 'center', alignItems: 'center',
     },
-    langOptionLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 14,
-    },
-    langOptionShort: {
-        color: Colors.primary.start,
-        fontSize: 16,
-        fontWeight: '800',
-        minWidth: 32,
-        textAlign: 'center',
-    },
-    langOptionName: {
-        color: '#fff',
-        fontSize: 15,
-        fontWeight: '600',
-    },
-    langOptionEnName: {
-        color: 'rgba(255,255,255,0.4)',
-        fontSize: 12,
-        marginTop: 1,
-    },
-    taglineRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    dataSourceBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 5,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        borderRadius: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-    },
-    dataSourceDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-    },
-    dataSourceText: {
-        color: 'rgba(255,255,255,0.6)',
-        fontSize: 10,
-        fontWeight: '600',
-    },
-    hamburgerBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    menuOverlay: {
-        flex: 1,
-        flexDirection: 'row',
-    },
-    menuBackdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-    },
+    langShortBadgeActive: { backgroundColor: Colors.primary.start },
+    langShortText: { fontSize: 14, fontWeight: '800', color: Colors.text.secondary },
+    langShortTextActive: { color: '#fff' },
+    langOptionName: { color: Colors.text.primary, fontSize: 15, fontWeight: '600' },
+    langOptionEnName: { color: Colors.text.tertiary, fontSize: 12 },
+
+    // Side Menu
+    menuOverlay: { flex: 1, flexDirection: 'row' },
+    menuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
     menuDrawer: {
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        bottom: 0,
-        width: width * 0.78,
-        shadowColor: '#000',
-        shadowOffset: { width: 4, height: 0 },
-        shadowOpacity: 0.4,
-        shadowRadius: 20,
-        elevation: 20,
+        position: 'absolute', left: 0, top: 0, bottom: 0,
+        width: width * 0.78, maxWidth: 320,
     },
-    menuGradient: {
-        flex: 1,
-        paddingTop: Platform.OS === 'ios' ? 60 : 45,
-        paddingHorizontal: 20,
-        paddingBottom: 30,
+    menuContainer: {
+        flex: 1, backgroundColor: Colors.card.background,
+        paddingTop: Platform.OS === 'ios' ? 58 : 42,
     },
     menuHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 30,
-        paddingBottom: 20,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.08)',
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+        paddingHorizontal: 20, marginBottom: 24,
     },
-    menuLogoRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
+    menuLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     menuLogoIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 36, height: 36, borderRadius: 10,
+        justifyContent: 'center', alignItems: 'center',
     },
-    menuLogoText: {
-        color: '#fff',
-        fontSize: 18,
-        fontWeight: '800',
+    menuLogoText: { color: Colors.text.primary, fontSize: 18, fontWeight: '800' },
+    menuCloseBtn: {
+        width: 36, height: 36, borderRadius: 10,
+        backgroundColor: Colors.background.tertiary,
+        justifyContent: 'center', alignItems: 'center',
     },
-    menuItems: {
-        flex: 1,
-        gap: 4,
-    },
+    menuItems: { paddingHorizontal: 16, gap: 2 },
     menuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 14,
-        paddingVertical: 14,
-        paddingHorizontal: 4,
-        borderRadius: 12,
+        flexDirection: 'row', alignItems: 'center', gap: 14,
+        paddingVertical: 14, paddingHorizontal: 10, borderRadius: 14,
     },
-    menuItemIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        justifyContent: 'center',
-        alignItems: 'center',
+    menuItemIconBox: {
+        width: 40, height: 40, borderRadius: 12,
+        justifyContent: 'center', alignItems: 'center',
     },
-    menuItemText: {
-        flex: 1,
-    },
-    menuItemLabel: {
-        color: '#fff',
-        fontSize: 15,
-        fontWeight: '700',
-    },
-    menuItemSub: {
-        color: 'rgba(255,255,255,0.4)',
-        fontSize: 12,
-        marginTop: 2,
-    },
+    menuItemTextBox: { flex: 1 },
+    menuItemLabel: { color: Colors.text.primary, fontSize: 15, fontWeight: '600' },
+    menuItemSub: { color: Colors.text.tertiary, fontSize: 12, marginTop: 1 },
     menuFooter: {
-        paddingTop: 16,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255,255,255,0.08)',
+        position: 'absolute', bottom: 30, left: 0, right: 0, alignItems: 'center',
     },
-    menuDataBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        paddingVertical: 8,
-    },
-    menuDataText: {
-        color: 'rgba(255,255,255,0.5)',
-        fontSize: 12,
+    menuFooterText: {
+        color: Colors.text.tertiary, fontSize: 12, fontWeight: '500',
+        backgroundColor: Colors.background.tertiary,
+        paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10,
     },
 });

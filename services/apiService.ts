@@ -1,9 +1,8 @@
 /**
- * API Service — Frontend Data Layer
- *
- * Provides a unified interface for data access.
- * Currently uses mock data (USE_LIVE_API = false).
- * When the backend is ready, flip the flag to switch to real API calls.
+ * This is our main data layer. 
+ * 
+ * We toggle between mock data and the real backend using USE_LIVE_API.
+ * If you're running the backend server, flip that flag to true!
  */
 
 import {
@@ -17,33 +16,22 @@ import {
     getTrainRunningDays as mockGetTrainRunningDays,
 } from './mockDataService';
 
-// ============================================================
-// CONFIGURATION
-// ============================================================
+// --- CONFIG ---
 
-/**
- * Set to `true` when the backend server is ready and running.
- * When `false`, all data comes from mockDataService.
- */
+// Flip this to true when your local server is up and running
 const USE_LIVE_API = false;
 
-/**
- * Backend API base URL. Update this if your server runs on a different host/port.
- * For Expo Go on physical device, use your computer's local IP (not localhost).
- */
+// If you're on a physical phone, change 'localhost' to your computer's IP
 const API_BASE_URL = 'http://localhost:3001';
 
-// ============================================================
-// TRAIN SEARCH
-// ============================================================
+// --- TRAIN SEARCH ---
 
 /**
- * Search for train seat availability.
- * Uses mock data when USE_LIVE_API is false.
+ * The main search function. 
+ * If we're in mock mode, we add a little delay so the UI feels more "real".
  */
 export async function searchTrain(params: SearchParams): Promise<Train | null> {
     if (!USE_LIVE_API) {
-        // Simulate network delay for realistic UX
         await new Promise(resolve => setTimeout(resolve, 800));
         return searchTrainAvailability(params);
     }
@@ -53,23 +41,19 @@ export async function searchTrain(params: SearchParams): Promise<Train | null> {
         const response = await fetch(url);
 
         if (!response.ok) {
-            console.warn(`API returned ${response.status}, falling back to mock data`);
+            console.warn(`Server complained with ${response.status}, falling back to mock data.`);
             return searchTrainAvailability(params);
         }
 
         return await response.json();
     } catch (error) {
-        console.warn('API unreachable, using mock data:', error);
+        console.warn('Can\'t reach the server, using mock data instead:', error);
         return searchTrainAvailability(params);
     }
 }
 
-// ============================================================
-// TRAIN SUGGESTIONS & STATIONS
-// ============================================================
-
+// These are pretty straightforward—just grabbing basic train info
 export function getTrainSuggestions(query: string) {
-    // Suggestions always come from local data (instant, no API needed)
     return mockGetTrainSuggestions(query);
 }
 
@@ -81,9 +65,7 @@ export function getTrainRunningDays(trainNumber: string) {
     return mockGetTrainRunningDays(trainNumber);
 }
 
-// ============================================================
-// SEAT REPORTS (Backend-only features, stubbed for now)
-// ============================================================
+// --- SEAT REPORTS ---
 
 export interface SeatReportData {
     seatId: number;
@@ -95,8 +77,7 @@ export interface SeatReportData {
 }
 
 /**
- * Submit a crowdsourced seat report.
- * Only works when USE_LIVE_API is true.
+ * Send a report about a seat to the server.
  */
 export async function reportSeat(data: SeatReportData): Promise<{ success: boolean; reportId?: number }> {
     if (!USE_LIVE_API) {
@@ -113,7 +94,7 @@ export async function reportSeat(data: SeatReportData): Promise<{ success: boole
 }
 
 /**
- * Get confidence score for a seat.
+ * Check how much we trust a seat's current status.
  */
 export async function getSeatConfidence(seatId: number): Promise<{
     confidence: number;
@@ -132,9 +113,7 @@ export async function getSeatConfidence(seatId: number): Promise<{
     return response.json();
 }
 
-// ============================================================
-// SWAP REQUESTS
-// ============================================================
+// --- SWAP REQUESTS ---
 
 export interface SwapRequestData {
     trainNo: string;
@@ -160,6 +139,9 @@ export async function createSwapRequest(data: SwapRequestData): Promise<{ succes
     return response.json();
 }
 
+/**
+ * Look for people on the same train who want to swap.
+ */
 export async function findSwapMatches(
     trainNo: string,
     journeyDate: string,
@@ -168,7 +150,7 @@ export async function findSwapMatches(
 ) {
     if (!USE_LIVE_API) {
         await new Promise(r => setTimeout(r, 500));
-        // All possible mock swap registrations in the system
+
         const allMockOffers = [
             { id: 101, otherUserId: 'user_abc', otherCoachId: 'B2', otherSeatNo: 15, otherSeatType: 'LOWER', desiredSeatType: 'UPPER', createdAt: new Date().toISOString() },
             { id: 102, otherUserId: 'user_def', otherCoachId: 'S4', otherSeatNo: 33, otherSeatType: 'SIDE_LOWER', desiredSeatType: 'MIDDLE', createdAt: new Date().toISOString() },
@@ -177,7 +159,7 @@ export async function findSwapMatches(
             { id: 105, otherUserId: 'user_mno', otherCoachId: 'S2', otherSeatNo: 41, otherSeatType: 'LOWER', desiredSeatType: 'SIDE_LOWER', createdAt: new Date().toISOString() },
         ];
 
-        // Filter: only show matches where their seat type = what you want, AND they want what you have
+        // Filter: do they want what I have, and do they have what I want?
         let filtered = allMockOffers;
         if (currentSeatType && desiredSeatType) {
             filtered = allMockOffers.filter(
@@ -199,7 +181,7 @@ export async function findSwapMatches(
 export async function acceptSwapRequest(swapId: number): Promise<{ success: boolean; message: string }> {
     if (!USE_LIVE_API) {
         await new Promise(r => setTimeout(r, 400));
-        return { success: true, message: 'Swap accepted! The other passenger will be notified.' };
+        return { success: true, message: 'Swap accepted! The other passenger will get a ping.' };
     }
 
     const response = await fetch(`${API_BASE_URL}/api/swaps/${swapId}/accept`, {
@@ -209,6 +191,51 @@ export async function acceptSwapRequest(swapId: number): Promise<{ success: bool
     return response.json();
 }
 
+export async function rejectSwapRequest(swapId: number): Promise<{ success: boolean; message: string }> {
+    if (!USE_LIVE_API) {
+        await new Promise(r => setTimeout(r, 400));
+        return { success: true, message: 'Swap rejected. Back to looking.' };
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/swaps/${swapId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    return response.json();
+}
+
+export async function cancelSwapRequest(swapId: number): Promise<{ success: boolean; message: string }> {
+    if (!USE_LIVE_API) {
+        await new Promise(r => setTimeout(r, 300));
+        return { success: true, message: 'Swap cancelled.' };
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/swaps/${swapId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    return response.json();
+}
+
+export async function getSwapAnalytics(trainNo: string, journeyDate: string) {
+    if (!USE_LIVE_API) {
+        return {
+            totalOffers: 6, activeOffers: 4, completedSwaps: 1, successRate: 0.17,
+            demandHeatmap: {
+                LOWER: { wanted: 4, offered: 2 }, MIDDLE: { wanted: 1, offered: 2 },
+                UPPER: { wanted: 0, offered: 3 }, SIDE_LOWER: { wanted: 2, offered: 1 },
+                SIDE_UPPER: { wanted: 1, offered: 0 },
+            },
+        };
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/swaps/${trainNo}/${journeyDate}/analytics`);
+    return response.json();
+}
+
+/**
+ * See a list of all people on this train looking to swap.
+ */
 export async function browseSwapOffers(trainNo: string, journeyDate: string) {
     if (!USE_LIVE_API) {
         await new Promise(r => setTimeout(r, 400));
@@ -227,9 +254,7 @@ export async function browseSwapOffers(trainNo: string, journeyDate: string) {
     return response.json();
 }
 
-// ============================================================
-// PNR PARSING & ANALYTICS
-// ============================================================
+// --- PNR & ANALYTICS ---
 
 export interface PNRResult {
     pnrHash: string;
@@ -245,13 +270,13 @@ export interface PNRResult {
 }
 
 /**
- * Parse an IRCTC SMS or PNR-related text.
- * Returns parsed seat/train data + any vacancy inference.
+ * Parse an IRCTC PNR text.
+ * We also try to guess if anyone's canceled based on the waitlist status.
  */
 export async function parsePNR(smsText: string): Promise<PNRResult | null> {
     if (!USE_LIVE_API) {
         await new Promise(r => setTimeout(r, 600));
-        // Mock: Simulate parsing a PNR
+        // Just look for 10 digits in a row
         const pnrMatch = smsText.match(/\d{10}/);
         if (!pnrMatch) return null;
 
@@ -271,7 +296,7 @@ export async function parsePNR(smsText: string): Promise<PNRResult | null> {
             berthType: mockBerthTypes[Math.floor(Math.random() * mockBerthTypes.length)],
             status: mockStatuses[Math.floor(Math.random() * mockStatuses.length)],
             vacancyInference: Math.random() > 0.5
-                ? 'WL 5 → CNF: Seat B3/42 is now OCCUPIED (upgraded from WL)'
+                ? 'Waitlist moved up — Seat B3/42 probably fresh.'
                 : undefined,
         };
     }
@@ -285,7 +310,7 @@ export async function parsePNR(smsText: string): Promise<PNRResult | null> {
         if (!response.ok) return null;
         return response.json();
     } catch {
-        return null;
+        return null; // Silent fail if server is down
     }
 }
 
@@ -301,8 +326,7 @@ export interface PNRAnalytics {
 }
 
 /**
- * Get aggregated PNR analytics for a train — how many seats appear vacant
- * based on collective PNR data from all users.
+ * Get the crowd-sourced data on how full a train actually is.
  */
 export async function getPNRAnalytics(trainNo: string): Promise<PNRAnalytics> {
     if (!USE_LIVE_API) {
@@ -311,7 +335,7 @@ export async function getPNRAnalytics(trainNo: string): Promise<PNRAnalytics> {
         const confirmed = Math.floor(total * (0.6 + Math.random() * 0.3));
         const wl = Math.floor((total - confirmed) * 0.6);
         const rac = total - confirmed - wl;
-        const trainCapacity = 800;
+        const trainCapacity = 800; // Rough average
         const estimatedVacancy = trainCapacity - confirmed;
 
         return {
@@ -330,9 +354,7 @@ export async function getPNRAnalytics(trainNo: string): Promise<PNRAnalytics> {
     return response.json();
 }
 
-// ============================================================
-// TOILET STATUS
-// ============================================================
+// --- TOILET STATUS ---
 
 export interface ToiletStatusData {
     id: number;
@@ -358,7 +380,7 @@ export async function getToiletStatus(trainNo: string, coachId: string): Promise
                 cleanlinessScore: 3.5,
                 waterAvailable: true,
                 queueLength: 2,
-                reportedBy: 'mock_user',
+                reportedBy: 'user_1',
                 timestamp: new Date(Date.now() - 600000).toISOString(),
             },
             {
@@ -369,7 +391,7 @@ export async function getToiletStatus(trainNo: string, coachId: string): Promise
                 cleanlinessScore: 2.8,
                 waterAvailable: false,
                 queueLength: 0,
-                reportedBy: 'mock_user_2',
+                reportedBy: 'user_2',
                 timestamp: new Date(Date.now() - 1200000).toISOString(),
             },
         ];
@@ -406,9 +428,7 @@ export async function reportToiletStatus(data: ToiletReportData): Promise<{ succ
     return response.json();
 }
 
-// ============================================================
-// UTILITY: Check backend connectivity
-// ============================================================
+// --- CONNECTIVITY CHECK ---
 
 export async function checkBackendHealth(): Promise<{
     isConnected: boolean;
@@ -416,7 +436,7 @@ export async function checkBackendHealth(): Promise<{
 }> {
     try {
         const response = await fetch(`${API_BASE_URL}/api/health`, {
-            signal: AbortSignal.timeout(3000),
+            signal: AbortSignal.timeout(3000), // Don't hang forever
         });
 
         if (response.ok) {
@@ -430,7 +450,7 @@ export async function checkBackendHealth(): Promise<{
 }
 
 /**
- * Returns whether the service is currently using live API or mock data.
+ * Quick helper to check if we're in mock mode.
  */
 export function isUsingLiveAPI(): boolean {
     return USE_LIVE_API;

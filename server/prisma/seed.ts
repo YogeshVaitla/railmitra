@@ -139,6 +139,25 @@ async function main() {
 
     console.log(`\n✅ Seeded ${totalSeats} seats across ${TRAINS_TO_SEED.length} trains`);
     console.log(`✅ Seeded ${sampleUsers.length} sample user reputations`);
+
+    // Seed sample swap requests for testing the matching engine
+    const today = new Date().toISOString().split('T')[0];
+    const sampleSwaps = [
+        { trainNo: '12301', userId: 'user_alpha_hash', currentCoachId: 'B1', currentSeatNo: 8, currentSeatType: 'UPPER', desiredSeatType: 'LOWER', reason: 'elderly', priorityScore: 0.50, journeyDate: today, expiresAt: new Date(Date.now() + 5 * 3600000) },
+        { trainNo: '12301', userId: 'user_beta_hash', currentCoachId: 'B2', currentSeatNo: 15, currentSeatType: 'LOWER', desiredSeatType: 'UPPER', reason: 'preference', priorityScore: 0.25, journeyDate: today, expiresAt: new Date(Date.now() + 4 * 3600000) },
+        { trainNo: '12301', userId: 'user_gamma_hash', currentCoachId: 'B3', currentSeatNo: 22, currentSeatType: 'MIDDLE', desiredSeatType: 'LOWER', reason: 'medical', priorityScore: 0.45, journeyDate: today, expiresAt: new Date(Date.now() + 6 * 3600000) },
+        { trainNo: '12301', userId: 'peer_001_hash', currentCoachId: 'B1', currentSeatNo: 33, currentSeatType: 'SIDE_LOWER', desiredSeatType: 'LOWER', reason: 'family', priorityScore: 0.35, journeyDate: today, expiresAt: new Date(Date.now() + 3 * 3600000) },
+        { trainNo: '12301', userId: 'peer_002_hash', currentCoachId: 'B4', currentSeatNo: 41, currentSeatType: 'LOWER', desiredSeatType: 'SIDE_LOWER', reason: 'preference', priorityScore: 0.25, journeyDate: today, expiresAt: new Date(Date.now() + 5 * 3600000) },
+        { trainNo: '12301', userId: 'peer_003_hash', currentCoachId: 'B2', currentSeatNo: 5, currentSeatType: 'SIDE_UPPER', desiredSeatType: 'LOWER', reason: 'elderly', priorityScore: 0.50, journeyDate: today, expiresAt: new Date(Date.now() + 4 * 3600000) },
+        { trainNo: '12951', userId: 'peer_004_hash', currentCoachId: 'A1', currentSeatNo: 12, currentSeatType: 'UPPER', desiredSeatType: 'LOWER', reason: 'medical', priorityScore: 0.45, journeyDate: today, expiresAt: new Date(Date.now() + 6 * 3600000) },
+        { trainNo: '12951', userId: 'peer_005_hash', currentCoachId: 'B1', currentSeatNo: 28, currentSeatType: 'LOWER', desiredSeatType: 'MIDDLE', reason: 'preference', priorityScore: 0.25, journeyDate: today, expiresAt: new Date(Date.now() + 5 * 3600000) },
+    ];
+
+    for (const swap of sampleSwaps) {
+        await prisma.swapRequest.create({ data: swap });
+    }
+    console.log(`✅ Seeded ${sampleSwaps.length} sample swap requests`);
+
     console.log('🎉 Done!\n');
 }
 

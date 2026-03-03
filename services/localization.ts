@@ -1,7 +1,7 @@
 // Localization strings - English
 const en = {
-    appName: 'Here Is My Seat',
-    tagline: 'Train Seat Availability',
+    appName: 'RailMitra',
+    tagline: 'Your Train Companion',
     searchTitle: 'Find Available Seats',
     trainNumber: 'Train Number',
     trainNumberPlaceholder: 'e.g., 12301',
@@ -56,8 +56,8 @@ const en = {
 
 // Hindi - हिन्दी
 const hi: typeof en = {
-    appName: 'यहाँ है मेरी सीट',
-    tagline: 'ट्रेन सीट उपलब्धता',
+    appName: 'RailMitra',
+    tagline: 'आपका ट्रेन साथी',
     searchTitle: 'उपलब्ध सीटें खोजें',
     trainNumber: 'ट्रेन नंबर',
     trainNumberPlaceholder: 'जैसे, 12301',
@@ -112,8 +112,8 @@ const hi: typeof en = {
 
 // Tamil - தமிழ்
 const ta: typeof en = {
-    appName: 'இதோ என் இருக்கை',
-    tagline: 'ரயில் இருக்கை கிடைப்பு',
+    appName: 'RailMitra',
+    tagline: 'உங்கள் ரயில் துணை',
     searchTitle: 'காலி இருக்கைகளை தேடு',
     trainNumber: 'ரயில் எண்',
     trainNumberPlaceholder: 'எ.கா., 12301',
@@ -168,8 +168,8 @@ const ta: typeof en = {
 
 // Telugu - తెలుగు
 const te: typeof en = {
-    appName: 'ఇదిగో నా సీటు',
-    tagline: 'రైలు సీటు లభ్యత',
+    appName: 'RailMitra',
+    tagline: 'మీ రైలు మిత్రుడు',
     searchTitle: 'ఖాళీ సీట్లు వెతకండి',
     trainNumber: 'రైలు నంబర్',
     trainNumberPlaceholder: 'ఉదా., 12301',
@@ -224,8 +224,8 @@ const te: typeof en = {
 
 // Bengali - বাংলা
 const bn: typeof en = {
-    appName: 'এই যে আমার সিট',
-    tagline: 'ট্রেন সিট প্রাপ্যতা',
+    appName: 'RailMitra',
+    tagline: 'আপনার ট্রেন সহচর',
     searchTitle: 'খালি সিট খুঁজুন',
     trainNumber: 'ট্রেন নম্বর',
     trainNumberPlaceholder: 'যেমন, 12301',
@@ -280,8 +280,8 @@ const bn: typeof en = {
 
 // Marathi - मराठी
 const mr: typeof en = {
-    appName: 'ही आहे माझी सीट',
-    tagline: 'ट्रेन सीट उपलब्धता',
+    appName: 'RailMitra',
+    tagline: 'तुमचा ट्रेन मित्र',
     searchTitle: 'रिकाम्या सीट शोधा',
     trainNumber: 'ट्रेन क्रमांक',
     trainNumberPlaceholder: 'उदा., 12301',
@@ -336,8 +336,8 @@ const mr: typeof en = {
 
 // Gujarati - ગુજરાતી
 const gu: typeof en = {
-    appName: 'આ છે મારી સીટ',
-    tagline: 'ટ્રેન સીટ ઉપલબ્ધતા',
+    appName: 'RailMitra',
+    tagline: 'તમારો ટ્રેન સાથી',
     searchTitle: 'ખાલી સીટ શોધો',
     trainNumber: 'ટ્રેન નંબર',
     trainNumberPlaceholder: 'દા.ત., 12301',
@@ -392,8 +392,8 @@ const gu: typeof en = {
 
 // Kannada - ಕನ್ನಡ
 const kn: typeof en = {
-    appName: 'ಇದು ನನ್ನ ಸೀಟು',
-    tagline: 'ರೈಲು ಆಸನ ಲಭ್ಯತೆ',
+    appName: 'RailMitra',
+    tagline: 'ನಿಮ್ಮ ರೈಲು ಗೆಳೆಯ',
     searchTitle: 'ಖಾಲಿ ಆಸನಗಳನ್ನು ಹುಡುಕಿ',
     trainNumber: 'ರೈಲು ಸಂಖ್ಯೆ',
     trainNumberPlaceholder: 'ಉದಾ., 12301',

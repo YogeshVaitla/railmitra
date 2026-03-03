@@ -1,16 +1,15 @@
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    View,
+    FlatList,
+    Platform,
+    StyleSheet,
     Text,
     TouchableOpacity,
-    FlatList,
-    StyleSheet,
-    Platform,
-    Alert,
+    View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import Colors from '../constants/Colors';
 import { FavoriteSearch } from '../models/types';
 import { getFavorites, removeFavorite } from '../services/favoritesService';
@@ -51,24 +50,21 @@ export default function FavoritesScreen() {
     };
 
     return (
-        <LinearGradient colors={Colors.background.dark as any} style={styles.container}>
+        <View style={styles.container}>
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <Ionicons name="arrow-back" size={22} color="#fff" />
+                    <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{t('favorites')}</Text>
-                <View style={{ width: 40 }} />
+                <View style={{ width: 42 }} />
             </View>
 
             {favorites.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                    <LinearGradient
-                        colors={[Colors.primary.start, Colors.primary.end]}
-                        style={styles.emptyIcon}
-                    >
-                        <Ionicons name="heart-outline" size={40} color="#fff" />
-                    </LinearGradient>
+                    <View style={styles.emptyIconBox}>
+                        <Ionicons name="heart-outline" size={40} color={Colors.primary.start} />
+                    </View>
                     <Text style={styles.emptyTitle}>{t('noFavorites')}</Text>
                     <Text style={styles.emptyText}>
                         Search for trains and tap the heart icon to save them here for quick access.
@@ -95,159 +91,103 @@ export default function FavoritesScreen() {
                             onPress={() => handleSelect(item)}
                             activeOpacity={0.7}
                         >
-                            <LinearGradient
-                                colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.03)']}
-                                style={styles.favCardGradient}
-                            >
-                                <View style={styles.favTop}>
-                                    <LinearGradient
-                                        colors={[Colors.primary.start, Colors.primary.end]}
-                                        style={styles.favIcon}
-                                    >
-                                        <MaterialCommunityIcons name="train" size={20} color="#fff" />
-                                    </LinearGradient>
-                                    <View style={styles.favInfo}>
-                                        <Text style={styles.favTrain}>
-                                            {item.trainNumber} - {item.trainName}
+                            <View style={styles.favTop}>
+                                <LinearGradient
+                                    colors={[Colors.primary.start, Colors.primary.end]}
+                                    style={styles.favIcon}
+                                >
+                                    <MaterialCommunityIcons name="train" size={20} color="#fff" />
+                                </LinearGradient>
+                                <View style={styles.favInfo}>
+                                    <Text style={styles.favTrain}>
+                                        {item.trainNumber} - {item.trainName}
+                                    </Text>
+                                    <View style={styles.favRoute}>
+                                        <Text style={styles.favStation}>
+                                            {item.fromStation} ({item.fromStationName})
                                         </Text>
-                                        <View style={styles.favRoute}>
-                                            <Text style={styles.favStation}>
-                                                {item.fromStation} ({item.fromStationName})
-                                            </Text>
-                                            <Ionicons name="arrow-forward" size={12} color="rgba(255,255,255,0.4)" />
-                                            <Text style={styles.favStation}>
-                                                {item.toStation} ({item.toStationName})
-                                            </Text>
-                                        </View>
+                                        <Ionicons name="arrow-forward" size={12} color={Colors.text.tertiary} />
+                                        <Text style={styles.favStation}>
+                                            {item.toStation} ({item.toStationName})
+                                        </Text>
                                     </View>
-                                    <TouchableOpacity
-                                        onPress={() => handleRemove(item.id)}
-                                        style={styles.removeBtn}
-                                    >
-                                        <Ionicons name="trash-outline" size={18} color={Colors.danger.end} />
-                                    </TouchableOpacity>
                                 </View>
-                            </LinearGradient>
+                                <TouchableOpacity
+                                    onPress={() => handleRemove(item.id)}
+                                    style={styles.removeBtn}
+                                >
+                                    <Ionicons name="trash-outline" size={18} color={Colors.danger.start} />
+                                </TouchableOpacity>
+                            </View>
                         </TouchableOpacity>
                     )}
                 />
             )}
-        </LinearGradient>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
-        flex: 1,
+        flex: 1, backgroundColor: Colors.background.primary,
         paddingTop: Platform.OS === 'ios' ? 55 : 40,
     },
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: 'row', alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        marginBottom: 20,
+        paddingHorizontal: 20, marginBottom: 20,
     },
     backBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 42, height: 42, borderRadius: 13,
+        backgroundColor: Colors.card.background,
+        justifyContent: 'center', alignItems: 'center',
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1, shadowRadius: 6, elevation: 3,
     },
-    headerTitle: {
-        color: '#fff',
-        fontSize: 18,
-        fontWeight: '700',
-    },
+    headerTitle: { color: Colors.text.primary, fontSize: 18, fontWeight: '700' },
     emptyContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 40,
+        flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40,
     },
-    emptyIcon: {
-        width: 80,
-        height: 80,
-        borderRadius: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
+    emptyIconBox: {
+        width: 80, height: 80, borderRadius: 24,
+        backgroundColor: Colors.primary.light,
+        justifyContent: 'center', alignItems: 'center',
         marginBottom: 20,
     },
     emptyTitle: {
-        color: '#fff',
-        fontSize: 18,
-        fontWeight: '700',
-        marginBottom: 8,
+        color: Colors.text.primary, fontSize: 18, fontWeight: '700', marginBottom: 8,
     },
     emptyText: {
-        color: 'rgba(255,255,255,0.5)',
-        fontSize: 14,
-        textAlign: 'center',
-        lineHeight: 22,
-        marginBottom: 24,
+        color: Colors.text.secondary, fontSize: 14,
+        textAlign: 'center', lineHeight: 22, marginBottom: 24,
     },
     emptyButton: {
-        paddingHorizontal: 28,
-        paddingVertical: 14,
-        borderRadius: 14,
+        paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14,
     },
-    emptyButtonText: {
-        color: '#fff',
-        fontSize: 15,
-        fontWeight: '700',
-    },
-    listContent: {
-        paddingHorizontal: 20,
-        paddingBottom: 20,
-    },
+    emptyButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+    listContent: { paddingHorizontal: 20, paddingBottom: 20 },
     favCard: {
-        borderRadius: 14,
-        overflow: 'hidden',
-        marginBottom: 10,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.06)',
-    },
-    favCardGradient: {
-        padding: 16,
+        backgroundColor: Colors.card.background,
+        borderRadius: 14, padding: 16, marginBottom: 10,
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 1, shadowRadius: 4, elevation: 2,
     },
     favTop: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
+        flexDirection: 'row', alignItems: 'center', gap: 12,
     },
     favIcon: {
-        width: 42,
-        height: 42,
-        borderRadius: 12,
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 42, height: 42, borderRadius: 12,
+        justifyContent: 'center', alignItems: 'center',
     },
-    favInfo: {
-        flex: 1,
-    },
-    favTrain: {
-        color: '#fff',
-        fontSize: 15,
-        fontWeight: '700',
-    },
+    favInfo: { flex: 1 },
+    favTrain: { color: Colors.text.primary, fontSize: 15, fontWeight: '700' },
     favRoute: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginTop: 4,
+        flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4,
     },
-    favStation: {
-        color: 'rgba(255,255,255,0.5)',
-        fontSize: 12,
-    },
+    favStation: { color: Colors.text.tertiary, fontSize: 12 },
     removeBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        backgroundColor: 'rgba(244, 92, 67, 0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 36, height: 36, borderRadius: 10,
+        backgroundColor: Colors.danger.light,
+        justifyContent: 'center', alignItems: 'center',
     },
 });

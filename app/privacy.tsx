@@ -1,20 +1,19 @@
-import React from 'react';
-import {
-    View,
-    Text,
-    TouchableOpacity,
-    ScrollView,
-    StyleSheet,
-    Platform,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import React from 'react';
+import {
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import Colors from '../constants/Colors';
 
 export default function PrivacyPolicyScreen() {
     return (
-        <LinearGradient colors={Colors.background.dark as any} style={styles.container}>
+        <View style={styles.container}>
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
@@ -22,7 +21,7 @@ export default function PrivacyPolicyScreen() {
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                        <Ionicons name="arrow-back" size={22} color="#fff" />
+                        <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Privacy Policy</Text>
                     <View style={{ width: 40 }} />
@@ -34,7 +33,7 @@ export default function PrivacyPolicyScreen() {
                 </View>
 
                 <Section title="1. Introduction">
-                    SeatCheck ("we", "our", or "the app") is committed to protecting your privacy.
+                    RailMitra ("we", "our", or "the app") is committed to protecting your privacy.
                     This Privacy Policy explains how we collect, use, and safeguard your information
                     when you use our mobile application.
                 </Section>
@@ -88,14 +87,14 @@ export default function PrivacyPolicyScreen() {
 
                 <Section title="9. Contact Us">
                     If you have any questions about this Privacy Policy, please contact us at:{'\n\n'}
-                    📧 support@seatcheck.app
+                    📧 support@railmitra.app
                 </Section>
 
                 <View style={styles.footer}>
-                    <Text style={styles.footerText}>© 2026 SeatCheck. All rights reserved.</Text>
+                    <Text style={styles.footerText}>© 2026 RailMitra. All rights reserved.</Text>
                 </View>
             </ScrollView>
-        </LinearGradient>
+        </View>
     );
 }
 
@@ -122,41 +121,40 @@ function BulletPoint({ text }: { text: string }) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1 },
+    container: { flex: 1, backgroundColor: Colors.background.primary },
     scrollContent: {
         paddingTop: Platform.OS === 'ios' ? 55 : 40,
-        paddingBottom: 40,
-        paddingHorizontal: 20,
+        paddingBottom: 40, paddingHorizontal: 20,
     },
     header: {
         flexDirection: 'row', alignItems: 'center',
         justifyContent: 'space-between', marginBottom: 20,
     },
     backBtn: {
-        width: 40, height: 40, borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.08)',
+        width: 42, height: 42, borderRadius: 13,
+        backgroundColor: Colors.card.background,
         justifyContent: 'center', alignItems: 'center',
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1, shadowRadius: 6, elevation: 3,
     },
-    headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+    headerTitle: { color: Colors.text.primary, fontSize: 18, fontWeight: '700' },
     badge: {
         flexDirection: 'row', alignItems: 'center', gap: 8,
-        backgroundColor: 'rgba(79, 172, 254, 0.1)',
+        backgroundColor: Colors.accent.light,
         borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8,
         alignSelf: 'flex-start', marginBottom: 20,
-        borderWidth: 1, borderColor: 'rgba(79, 172, 254, 0.15)',
     },
-    badgeText: { color: '#4facfe', fontSize: 12, fontWeight: '600' },
+    badgeText: { color: Colors.accent.start, fontSize: 12, fontWeight: '600' },
     section: {
-        backgroundColor: 'rgba(255,255,255,0.04)',
-        borderRadius: 14, padding: 16, marginBottom: 12,
-        borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)',
+        backgroundColor: Colors.card.background, borderRadius: 14,
+        padding: 16, marginBottom: 12,
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 1, shadowRadius: 4, elevation: 2,
     },
     sectionTitle: {
-        color: '#fff', fontSize: 15, fontWeight: '700', marginBottom: 10,
+        color: Colors.text.primary, fontSize: 15, fontWeight: '700', marginBottom: 10,
     },
-    sectionText: {
-        color: 'rgba(255,255,255,0.6)', fontSize: 14, lineHeight: 22,
-    },
+    sectionText: { color: Colors.text.secondary, fontSize: 14, lineHeight: 22 },
     bullet: {
         flexDirection: 'row', alignItems: 'flex-start', gap: 10,
         marginBottom: 8,
@@ -165,7 +163,7 @@ const styles = StyleSheet.create({
         width: 6, height: 6, borderRadius: 3,
         backgroundColor: Colors.primary.start, marginTop: 7,
     },
-    bulletText: { color: 'rgba(255,255,255,0.6)', fontSize: 14, lineHeight: 22, flex: 1 },
+    bulletText: { color: Colors.text.secondary, fontSize: 14, lineHeight: 22, flex: 1 },
     footer: { alignItems: 'center', paddingVertical: 20 },
-    footerText: { color: 'rgba(255,255,255,0.2)', fontSize: 11 },
+    footerText: { color: Colors.text.tertiary, fontSize: 11 },
 });

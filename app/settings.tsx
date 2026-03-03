@@ -1,21 +1,21 @@
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    View,
-    Text,
-    TouchableOpacity,
+    Linking,
+    Platform,
     ScrollView,
     StyleSheet,
-    Platform,
-    Linking,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import Colors from '../constants/Colors';
-import { t, getLanguage, setLanguage, Language, LANGUAGES } from '../services/localization';
+import { getLanguage, Language, LANGUAGES, setLanguage, t } from '../services/localization';
 
 const APP_VERSION = '1.0.0';
-const SUPPORT_EMAIL = 'support@seatcheck.app';
+const SUPPORT_EMAIL = 'support@railmitra.app';
 
 export default function SettingsScreen() {
     const [lang, setLang] = useState<Language>(getLanguage());
@@ -35,11 +35,11 @@ export default function SettingsScreen() {
     };
 
     const sendEmail = () => {
-        Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=SeatCheck App Support`).catch(() => { });
+        Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=RailMitra App Support`).catch(() => { });
     };
 
     return (
-        <LinearGradient colors={Colors.background.dark as any} style={styles.container}>
+        <View style={styles.container}>
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
@@ -47,7 +47,7 @@ export default function SettingsScreen() {
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                        <Ionicons name="arrow-back" size={22} color="#fff" />
+                        <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>{t('settings')}</Text>
                     <View style={{ width: 40 }} />
@@ -113,7 +113,7 @@ export default function SettingsScreen() {
                                 <Text style={styles.menuSubtitle}>Your saved train searches</Text>
                             </View>
                         </View>
-                        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
                     </TouchableOpacity>
                 </View>
 
@@ -132,11 +132,11 @@ export default function SettingsScreen() {
                                 <Ionicons name="information-circle" size={18} color="#fff" />
                             </LinearGradient>
                             <View>
-                                <Text style={styles.menuTitle}>About SeatCheck</Text>
+                                <Text style={styles.menuTitle}>About RailMitra</Text>
                                 <Text style={styles.menuSubtitle}>Learn more about the app</Text>
                             </View>
                         </View>
-                        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -155,7 +155,7 @@ export default function SettingsScreen() {
                                 <Text style={styles.menuSubtitle}>How we handle your data</Text>
                             </View>
                         </View>
-                        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -174,7 +174,7 @@ export default function SettingsScreen() {
                                 <Text style={styles.menuSubtitle}>Usage terms and disclaimer</Text>
                             </View>
                         </View>
-                        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
                     </TouchableOpacity>
                 </View>
 
@@ -194,7 +194,7 @@ export default function SettingsScreen() {
                                 <Text style={styles.menuSubtitle}>{SUPPORT_EMAIL}</Text>
                             </View>
                         </View>
-                        <Ionicons name="open-outline" size={16} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="open-outline" size={16} color={Colors.text.tertiary} />
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem} onPress={() => { }}>
@@ -210,172 +210,96 @@ export default function SettingsScreen() {
                                 <Text style={styles.menuSubtitle}>Love the app? Rate us on Play Store</Text>
                             </View>
                         </View>
-                        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
                     </TouchableOpacity>
                 </View>
 
                 {/* Footer */}
                 <View style={styles.footer}>
                     <Text style={styles.footerText}>Made with ❤️ in India</Text>
-                    <Text style={styles.footerVersion}>SeatCheck v{APP_VERSION}</Text>
+                    <Text style={styles.footerVersion}>RailMitra v{APP_VERSION}</Text>
                     <Text style={styles.footerDisclaimer}>
                         This app is not affiliated with Indian Railways or IRCTC.
                     </Text>
                 </View>
             </ScrollView>
-        </LinearGradient>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
+    container: { flex: 1, backgroundColor: Colors.background.primary },
     scrollContent: {
         paddingTop: Platform.OS === 'ios' ? 55 : 40,
-        paddingBottom: 40,
-        paddingHorizontal: 20,
+        paddingBottom: 40, paddingHorizontal: 20,
     },
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 24,
+        flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'space-between', marginBottom: 24,
     },
     backBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 42, height: 42, borderRadius: 13,
+        backgroundColor: Colors.card.background,
+        justifyContent: 'center', alignItems: 'center',
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1, shadowRadius: 6, elevation: 3,
     },
-    headerTitle: {
-        color: '#fff',
-        fontSize: 18,
-        fontWeight: '700',
-    },
+    headerTitle: { color: Colors.text.primary, fontSize: 18, fontWeight: '700' },
     appCard: {
-        borderRadius: 20,
-        padding: 24,
-        alignItems: 'center',
-        marginBottom: 24,
+        borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 24,
     },
-    appIconContainer: {
-        marginBottom: 12,
-    },
+    appIconContainer: { marginBottom: 12 },
     appIcon: {
-        width: 64,
-        height: 64,
-        borderRadius: 18,
+        width: 64, height: 64, borderRadius: 18,
         backgroundColor: '#fff',
-        justifyContent: 'center',
-        alignItems: 'center',
+        justifyContent: 'center', alignItems: 'center',
     },
-    appCardName: {
-        color: '#fff',
-        fontSize: 24,
-        fontWeight: '800',
-    },
+    appCardName: { color: '#fff', fontSize: 24, fontWeight: '800' },
     appCardTagline: {
-        color: 'rgba(255,255,255,0.8)',
-        fontSize: 13,
-        marginTop: 4,
-        letterSpacing: 1,
-        textTransform: 'uppercase',
+        color: 'rgba(255,255,255,0.85)', fontSize: 13,
+        marginTop: 4, letterSpacing: 1, textTransform: 'uppercase',
     },
     versionBadge: {
-        marginTop: 12,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
+        marginTop: 12, backgroundColor: 'rgba(255,255,255,0.2)',
+        borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4,
     },
-    versionText: {
-        color: '#fff',
-        fontSize: 12,
-        fontWeight: '700',
-    },
+    versionText: { color: '#fff', fontSize: 12, fontWeight: '700' },
     sectionTitle: {
-        color: 'rgba(255,255,255,0.5)',
-        fontSize: 12,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-        letterSpacing: 1.5,
-        marginBottom: 10,
-        marginLeft: 4,
+        color: Colors.text.tertiary, fontSize: 12, fontWeight: '700',
+        textTransform: 'uppercase', letterSpacing: 1.5,
+        marginBottom: 10, marginLeft: 4,
     },
     section: {
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        borderRadius: 16,
-        overflow: 'hidden',
-        marginBottom: 24,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.06)',
+        backgroundColor: Colors.card.background, borderRadius: 16,
+        overflow: 'hidden', marginBottom: 24,
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 1, shadowRadius: 4, elevation: 2,
     },
     menuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: 'row', alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.04)',
+        paddingVertical: 14, paddingHorizontal: 16,
+        borderBottomWidth: 1, borderBottomColor: Colors.divider,
     },
     menuLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 14,
-        flex: 1,
+        flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1,
     },
     menuIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 36, height: 36, borderRadius: 10,
+        justifyContent: 'center', alignItems: 'center',
     },
-    menuTitle: {
-        color: '#fff',
-        fontSize: 15,
-        fontWeight: '600',
-    },
-    menuSubtitle: {
-        color: 'rgba(255,255,255,0.4)',
-        fontSize: 12,
-        marginTop: 2,
-    },
+    menuTitle: { color: Colors.text.primary, fontSize: 15, fontWeight: '600' },
+    menuSubtitle: { color: Colors.text.tertiary, fontSize: 12, marginTop: 2 },
     langSwitch: {
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: Colors.background.tertiary,
+        borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
     },
-    langSwitchText: {
-        color: '#fff',
-        fontSize: 13,
-        fontWeight: '700',
-    },
-    footer: {
-        alignItems: 'center',
-        paddingVertical: 20,
-        gap: 6,
-    },
-    footerText: {
-        color: 'rgba(255,255,255,0.4)',
-        fontSize: 13,
-    },
-    footerVersion: {
-        color: 'rgba(255,255,255,0.25)',
-        fontSize: 11,
-    },
+    langSwitchText: { color: Colors.text.primary, fontSize: 13, fontWeight: '700' },
+    footer: { alignItems: 'center', paddingVertical: 20, gap: 6 },
+    footerText: { color: Colors.text.secondary, fontSize: 13 },
+    footerVersion: { color: Colors.text.tertiary, fontSize: 11 },
     footerDisclaimer: {
-        color: 'rgba(255,255,255,0.2)',
-        fontSize: 10,
-        textAlign: 'center',
-        marginTop: 4,
-        lineHeight: 16,
+        color: Colors.text.tertiary, fontSize: 10,
+        textAlign: 'center', marginTop: 4, lineHeight: 16,
     },
 });

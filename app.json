@@ -1,20 +1,20 @@
 {
   "expo": {
-    "name": "Here Is My Seat",
+    "name": "RailMitra",
     "slug": "here-is-my-seat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "hereismyseat",
-    "userInterfaceStyle": "dark",
+    "scheme": "railmitra",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "package": "com.hereismyseat.app",
+      "package": "com.railmitra.app",
       "adaptiveIcon": {
-        "backgroundColor": "#0f0c29",
+        "backgroundColor": "#FFF8F3",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -34,9 +34,9 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#0f0c29",
+          "backgroundColor": "#FFF8F3",
           "dark": {
-            "backgroundColor": "#0f0c29"
+            "backgroundColor": "#FFF8F3"
           }
         }
       ],
@@ -52,6 +52,7 @@
       "eas": {
         "projectId": "52fdbdbe-0dc6-438f-aeb7-762c0640436d"
       }
-    }
+    },
+    "owner": "yvaitla"
   }
 }

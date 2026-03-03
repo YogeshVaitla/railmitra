@@ -1,115 +1,172 @@
-import React, { useState, useEffect } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { Component, useEffect, useState } from 'react';
+import { Animated, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Colors from '../constants/Colors';
+
+// --- Error Boundary ---
+// Catches unhandled JS errors so the app shows a friendly screen instead of crashing to white.
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: '' };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message || 'Unknown error' };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, backgroundColor: Colors.background.primary, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+          <Text style={{ fontSize: 40, marginBottom: 16 }}>😕</Text>
+          <Text style={{ color: Colors.text.primary, fontSize: 20, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>
+            Something went wrong
+          </Text>
+          <Text style={{ color: Colors.text.secondary, fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 24 }}>
+            The app ran into an unexpected issue. Please restart the app.
+          </Text>
+          <TouchableOpacity
+            onPress={() => this.setState({ hasError: false, error: '' })}
+            style={{ backgroundColor: Colors.primary.start, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 }}
+          >
+            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>Try Again</Text>
+          </TouchableOpacity>
+          <Text style={{ color: Colors.text.tertiary, fontSize: 11, marginTop: 20, textAlign: 'center' }}>
+            {this.state.error}
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const { width } = Dimensions.get('window');
 
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
-  const trainSlide = useState(new Animated.Value(-100))[0];
+  const trainSlide = useState(new Animated.Value(-80))[0];
   const titleFade = useState(new Animated.Value(0))[0];
   const subtitleFade = useState(new Animated.Value(0))[0];
   const splashFade = useState(new Animated.Value(1))[0];
-  const trainScale = useState(new Animated.Value(0.5))[0];
-  const glowPulse = useState(new Animated.Value(0))[0];
+  const trainScale = useState(new Animated.Value(0.6))[0];
+  const dotPulse = useState(new Animated.Value(0.4))[0];
 
   useEffect(() => {
-    // Step 1: Train emoji slides in + scales up
+    // Train emoji slides in + grows
     Animated.parallel([
       Animated.spring(trainSlide, {
-        toValue: 0, tension: 50, friction: 7, useNativeDriver: true,
+        toValue: 0, tension: 50, friction: 8, useNativeDriver: true,
       }),
       Animated.spring(trainScale, {
-        toValue: 1, tension: 50, friction: 7, useNativeDriver: true,
+        toValue: 1, tension: 50, friction: 8, useNativeDriver: true,
       }),
     ]).start();
 
-    // Step 2: Title appears
+    // Title fades in
     setTimeout(() => {
       Animated.timing(titleFade, {
-        toValue: 1, duration: 600, useNativeDriver: true,
+        toValue: 1, duration: 500, useNativeDriver: true,
       }).start();
-    }, 400);
+    }, 350);
 
-    // Step 3: Subtitle appears
+    // Subtitle fades in
     setTimeout(() => {
       Animated.timing(subtitleFade, {
         toValue: 1, duration: 400, useNativeDriver: true,
       }).start();
-    }, 800);
+    }, 700);
 
-    // Step 4: Glow pulse
+    // Gentle dot pulse
     setTimeout(() => {
       Animated.loop(
         Animated.sequence([
-          Animated.timing(glowPulse, { toValue: 1, duration: 800, useNativeDriver: true }),
-          Animated.timing(glowPulse, { toValue: 0, duration: 800, useNativeDriver: true }),
+          Animated.timing(dotPulse, { toValue: 1, duration: 900, useNativeDriver: true }),
+          Animated.timing(dotPulse, { toValue: 0.4, duration: 900, useNativeDriver: true }),
         ])
       ).start();
-    }, 600);
+    }, 500);
 
-    // Step 5: Fade out splash → show app
+    // Fade out → show app
     setTimeout(() => {
       Animated.timing(splashFade, {
         toValue: 0, duration: 400, useNativeDriver: true,
       }).start(() => setIsReady(true));
-    }, 2500);
+    }, 2200);
   }, []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0f0c29' }}>
-      <StatusBar style="light" />
+    <View style={{ flex: 1, backgroundColor: Colors.background.primary }}>
+      <StatusBar style="dark" />
       {!isReady && (
         <Animated.View style={[styles.splash, { opacity: splashFade }]}>
-          <LinearGradient
-            colors={['#0f0c29', '#302b63', '#24243e']}
-            style={styles.splashGradient}
-          >
+          <View style={styles.splashContainer}>
+            {/* Top decorative bar */}
+            <LinearGradient
+              colors={[Colors.primary.start, Colors.primary.end]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.topBar}
+            />
+
             <View style={styles.splashContent}>
-              <Animated.Text
+              {/* Train icon with coral circle */}
+              <Animated.View
                 style={[
-                  styles.trainEmoji,
+                  styles.trainCircle,
                   {
                     transform: [
-                      { translateX: trainSlide },
+                      { translateY: trainSlide },
                       { scale: trainScale },
                     ],
                   },
                 ]}
               >
-                🚂
-              </Animated.Text>
-              <Animated.View style={[styles.titleRow, { opacity: titleFade }]}>
-                <Text style={styles.splashTitle}>Here Is My Seat</Text>
+                <LinearGradient
+                  colors={[Colors.primary.start, Colors.primary.end]}
+                  style={styles.trainCircleGradient}
+                >
+                  <Text style={styles.trainEmoji}>🚂</Text>
+                </LinearGradient>
+              </Animated.View>
+
+              {/* App name */}
+              <Animated.View style={[styles.titleContainer, { opacity: titleFade }]}>
+                <Text style={styles.splashTitle}>Rail</Text>
+                <Text style={styles.splashTitleAccent}>Mitra</Text>
                 <Animated.View
-                  style={[
-                    styles.glowDot,
-                    {
-                      opacity: glowPulse,
-                      transform: [{ scale: Animated.add(1, Animated.multiply(glowPulse, 0.3 as any)) }],
-                    },
-                  ]}
+                  style={[styles.liveDot, { opacity: dotPulse }]}
                 />
               </Animated.View>
+
+              {/* Tagline */}
               <Animated.Text style={[styles.splashSubtitle, { opacity: subtitleFade }]}>
-                Train Seat Availability
+                Your Train Companion
               </Animated.Text>
             </View>
-            <Animated.View style={[styles.trackLine, { opacity: subtitleFade }]}>
+
+            {/* Bottom track */}
+            <Animated.View style={[styles.trackContainer, { opacity: subtitleFade }]}>
               <View style={styles.track} />
+              <View style={styles.trackDots}>
+                {[0, 1, 2, 3, 4].map(i => (
+                  <View key={i} style={styles.trackDot} />
+                ))}
+              </View>
             </Animated.View>
-          </LinearGradient>
+          </View>
         </Animated.View>
       )}
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: 'transparent' },
-          animation: 'slide_from_right',
-        }}
-      />
+      <ErrorBoundary>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: 'transparent' },
+            animation: 'slide_from_right',
+          }}
+        />
+      </ErrorBoundary>
     </View>
   );
 }
@@ -119,53 +176,97 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 100,
   },
-  splashGradient: {
+  splashContainer: {
     flex: 1,
+    backgroundColor: Colors.background.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+  },
   splashContent: {
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
   },
-  trainEmoji: {
-    fontSize: 64,
+  trainCircle: {
     marginBottom: 8,
   },
-  titleRow: {
+  trainCircleGradient: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: Colors.primary.start,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  trainEmoji: {
+    fontSize: 42,
+  },
+  titleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 0,
   },
   splashTitle: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: 1,
+    color: Colors.text.primary,
+    fontSize: 32,
+    fontWeight: '300',
+    letterSpacing: 0.5,
   },
-  glowDot: {
+  splashTitleAccent: {
+    color: Colors.primary.start,
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  liveDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#38ef7d',
+    backgroundColor: Colors.success.start,
+    marginLeft: 8,
+    marginTop: -8,
   },
   splashSubtitle: {
-    color: 'rgba(255,255,255,0.5)',
+    color: Colors.text.tertiary,
     fontSize: 14,
     fontWeight: '500',
-    letterSpacing: 2,
+    letterSpacing: 3,
     textTransform: 'uppercase',
   },
-  trackLine: {
+  trackContainer: {
     position: 'absolute',
-    bottom: 120,
-    width: width * 0.6,
+    bottom: 100,
+    width: width * 0.5,
     alignItems: 'center',
   },
   track: {
     width: '100%',
     height: 2,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: Colors.divider,
     borderRadius: 1,
+  },
+  trackDots: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: -3.5,
+  },
+  trackDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: Colors.primary.light,
+    borderWidth: 1,
+    borderColor: Colors.divider,
   },
 });

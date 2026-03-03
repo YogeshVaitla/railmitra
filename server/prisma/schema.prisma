@@ -1,28 +1,26 @@
-// Prisma schema for Seat Seeker
-// Currently using SQLite for development. To switch to PostgreSQL:
-// 1. Change provider to "postgresql"
-// 2. Update DATABASE_URL in .env to: postgresql://user:password@localhost:5432/seatseeker
-// All models and queries remain identical.
+// Main schema for the Train Seat Seeker app
+// Using PostgreSQL for production/cloud deployment.
+// For local dev with SQLite, change provider to "sqlite" and update DATABASE_URL in .env.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-// ============================================================
-// MODEL 1: SeatMaster — Static baseline train/coach/seat data
-// ============================================================
+// SeatMaster: This is our static list of all trains, coaches, and seats.
+// Basically the "blueprint" of every train we track.
 model SeatMaster {
   id         Int        @id @default(autoincrement())
   trainNo    String
   coachId    String
   seatNo     Int
-  seatType   String     // WINDOW, MIDDLE, AISLE, LOWER, MIDDLE_BERTH, UPPER, SIDE_LOWER, SIDE_UPPER
-  coachType  String     // LHB, ICF, UNKNOWN
+  seatType   String     // e.g. WINDOW, MIDDLE, AISLE, etc.
+  coachType  String     // LHB, ICF, or UNKNOWN if we can't tell
   classType  String     // SL, 3A, 2A, 1A, CC, EC
 
   reports    SeatReport[]
@@ -32,35 +30,33 @@ model SeatMaster {
   @@index([trainNo, coachId])
 }
 
-// ============================================================
-// MODEL 2: SeatReport — Crowdsourced seat status reports
-// ============================================================
+// SeatReport: These are the actual live updates from users on the train.
+// "Is this seat empty right now?" "Yeah, I'm sitting here" or "Someone's luggage is here".
 model SeatReport {
   id                 Int      @id @default(autoincrement())
   seatId             Int
   seat               SeatMaster @relation(fields: [seatId], references: [id])
-  status             String   // EMPTY, OCCUPIED, EXCHANGE_OFFER
-  deviceId           String   // Hashed device identifier
+  status             String   // EMPTY, OCCUPIED, or EXCHANGE_OFFER
+  deviceId           String   // We hash this to keep people's hardware private
   gpsLat             Float?
   gpsLong            Float?
-  verificationMethod String   // GPS_GEOFENCE, PNR_ANCHOR, BLUETOOTH_PEER, MANUAL
-  confidence         Float    @default(0.5) // Computed confidence score
+  verificationMethod String   // How did we verify this? GPS? PNR check? Peer confirmed?
+  confidence         Float    @default(0.5) // How much we trust this specific report
   timestamp          DateTime @default(now())
 
   @@index([seatId, timestamp])
   @@index([deviceId])
 }
 
-// ============================================================
-// MODEL 3: UserReputation — Trust scoring engine
-// ============================================================
+// UserReputation: Keeps track of who's reliable. 
+// If someone reports accurately, their trust score goes up.
 model UserReputation {
   id              Int      @id @default(autoincrement())
   deviceId        String   @unique
-  trustScore      Float    @default(0.5) // 0.0 to 1.0
+  trustScore      Float    @default(0.5) // Ranges from 0 (liar) to 1 (perfect)
   totalReports    Int      @default(0)
   verifiedReports Int      @default(0)
-  streakCount     Int      @default(0) // Consecutive verified reports
+  streakCount     Int      @default(0) // How many good reports in a row?
   lastReportAt    DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -68,40 +64,76 @@ model UserReputation {
   @@index([trustScore])
 }
 
-// ============================================================
-// MODEL 4: ToiletStatus — Coach toilet conditions
-// ============================================================
+// ToiletStatus: Cleanliness and water levels in specific coaches.
 model ToiletStatus {
   id               Int      @id @default(autoincrement())
   trainNo          String
   coachId          String
-  toiletType       String   // WESTERN, INDIAN
-  cleanlinessScore Float    @default(3.0) // 1.0 to 5.0
+  toiletType       String   // WESTERN or INDIAN
+  cleanlinessScore Float    @default(3.0) // 1 to 5 scale
   waterAvailable   Boolean  @default(true)
-  queueLength      Int      @default(0) // Inferred from step counters
+  queueLength      Int      @default(0) // Inferred from foot traffic/sensors
   reportedBy       String   // deviceId (hashed)
   timestamp        DateTime @default(now())
 
   @@index([trainNo, coachId])
 }
 
-// ============================================================
-// MODEL 5: SwapRequest — P2P seat exchange system
-// ============================================================
+// SwapRequest: For when someone wants to switch seats with a fellow passenger.
+// "I have a middle berth, I want a lower berth"
 model SwapRequest {
   id              Int      @id @default(autoincrement())
   trainNo         String
   userId          String   // deviceId (hashed)
   currentCoachId  String
   currentSeatNo   Int
-  currentSeatType String   // LOWER, UPPER, MIDDLE, WINDOW, AISLE, SIDE_LOWER, SIDE_UPPER
-  desiredSeatType String   // What they want
-  status          String   @default("OPEN") // OPEN, MATCHED, COMPLETED, CANCELLED
-  matchedWith     Int?     // ID of the matched SwapRequest
+  currentSeatType String   // Current berth type
+  desiredSeatType String   // What the user is hoping to get
+  status          String   @default("OPEN") // OPEN, MATCHED, ACCEPTED, COMPLETED, CANCELLED, EXPIRED, WITHDRAWN
+  matchedWith     Int?     // Link to the other person's SwapRequest ID
+  sessionId       Int?     // Links to SwapSession for multi-party swaps
+  priorityScore   Float    @default(0.5)   // Computed from trust, wait time, reason
+  reason          String?  // "elderly", "medical", "family", "preference"
+  expiresAt       DateTime? // Auto-expire stale requests
   journeyDate     String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  events          SwapEvent[]
+  session         SwapSession? @relation(fields: [sessionId], references: [id])
+
   @@index([trainNo, status])
   @@index([trainNo, desiredSeatType, status])
+  @@index([trainNo, journeyDate, status])
+  @@index([expiresAt])
+}
+
+// Immutable audit log — every state change is recorded here.
+// This is the kind of thing acquirers love to see: full traceability.
+model SwapEvent {
+  id          Int      @id @default(autoincrement())
+  swapId      Int
+  swap        SwapRequest @relation(fields: [swapId], references: [id])
+  eventType   String   // CREATED, MATCHED, ACCEPTED, REJECTED, CANCELLED, EXPIRED, COMPLETED, WITHDRAWN
+  actorId     String   // Who triggered this (hashed device ID)
+  metadata    String?  // JSON blob with extra context
+  timestamp   DateTime @default(now())
+
+  @@index([swapId, timestamp])
+  @@index([eventType])
+}
+
+// Groups multi-party swaps into atomic transactions.
+// A 3-way swap needs all 3 people to accept — this tracks that.
+model SwapSession {
+  id            Int      @id @default(autoincrement())
+  type          String   // DIRECT, TRIANGULAR, CHAIN
+  status        String   @default("PENDING") // PENDING, ACCEPTED, COMPLETED, FAILED
+  participants  SwapRequest[]
+  acceptedBy    String   @default("") // Comma-separated list of userIds who accepted
+  totalRequired Int      @default(2)
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  @@index([status])
 }
