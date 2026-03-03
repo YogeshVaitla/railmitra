@@ -14,15 +14,15 @@
     },
     "dependencies": {
         "@prisma/client": "^6.4.0",
-        "cors": "^2.8.5",
-        "express": "^4.21.0"
-    },
-    "devDependencies": {
         "@types/cors": "^2.8.17",
         "@types/express": "^5.0.0",
         "@types/node": "^22.0.0",
+        "cors": "^2.8.5",
+        "express": "^4.21.0",
         "prisma": "^6.4.0",
-        "ts-node": "^10.9.2",
         "typescript": "^5.7.0"
+    },
+    "devDependencies": {
+        "ts-node": "^10.9.2"
     }
 }
