@@ -234,7 +234,7 @@ function validateSwapInput(params: {
 }
 
 function isValidRemoteSwap(swap: any): boolean {
-    // Validate structure of a swap received via mesh
+    // Validate structure of a swap received via mesh or cloud
     if (!swap || typeof swap !== 'object') return false;
     if (typeof swap.id !== 'string' || swap.id.length < 8) return false;
     if (typeof swap.deviceId !== 'string' || swap.deviceId.length < 8) return false;
@@ -242,7 +242,10 @@ function isValidRemoteSwap(swap: any): boolean {
     if (typeof swap.currentSeatNo !== 'number' || swap.currentSeatNo < 1 || swap.currentSeatNo > MAX_SEAT_NUMBER) return false;
     if (!VALID_SEAT_TYPES.includes(swap.currentSeatType)) return false;
     if (!VALID_SEAT_TYPES.includes(swap.desiredSeatType)) return false;
-    if (typeof swap.createdAt !== 'number' || swap.createdAt > Date.now() + 60000) return false; // Reject future timestamps (>1 min)
+
+    // Server/Device clocks can drift. Let's just ensure it hasn't expired yet.
+    if (typeof swap.expiresAt === 'number' && swap.expiresAt < Date.now()) return false;
+
     return true;
 }
 

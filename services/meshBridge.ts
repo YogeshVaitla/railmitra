@@ -286,6 +286,8 @@ export class CloudSyncBridge implements IMeshBridge {
             );
 
             if (!response.ok) {
+                const errText = await response.text();
+                console.warn(`[CloudSync] fetchOffers failed: ${response.status} ${errText}`);
                 this.serverReachable = false;
                 return;
             }
@@ -384,9 +386,12 @@ export class CloudSyncBridge implements IMeshBridge {
                     this.serverSwapIdMap.set(swap.id, result.swapId);
                     console.log('[CloudSync] Offer synced to server, ID:', result.swapId);
                 }
+            } else {
+                const errText = await response.text();
+                console.warn(`[CloudSync] postOffer failed: ${response.status} ${errText}`);
             }
-        } catch {
-            console.log('[CloudSync] Could not sync offer — will retry on next poll');
+        } catch (error: any) {
+            console.warn('[CloudSync] Could not sync offer (network error):', error.message);
         }
     }
 
