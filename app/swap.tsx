@@ -107,11 +107,8 @@ export default function SwapScreen() {
 
     // --- Handlers (logic preserved exactly) ---
 
-    const handleBrowse = async () => {
+    const initMeshBridge = async () => {
         if (!trainNo || trainNo.length < 4) return;
-        setBrowseLoading(true);
-        setHasBrowsed(false);
-
         if (!meshRef.current || !meshRef.current.isActive()) {
             const mesh = createMeshBridge();
             meshRef.current = mesh;
@@ -121,10 +118,19 @@ export default function SwapScreen() {
             });
             mesh.onSwapReceived((newSwaps) => {
                 browseOffers(trainNo, journeyDate).then(setOffers);
+                handleFindMatches(); // Auto-refresh matches when background sync receives offers
                 showNotification(`📡 ${newSwaps.length} new offer${newSwaps.length > 1 ? 's' : ''} from nearby passengers`);
             });
             await mesh.startDiscovery(trainNo, journeyDate);
         }
+    };
+
+    const handleBrowse = async () => {
+        if (!trainNo || trainNo.length < 4) return;
+        setBrowseLoading(true);
+        setHasBrowsed(false);
+
+        await initMeshBridge();
 
         const result = await browseOffers(trainNo, journeyDate);
         setOffers(result);
@@ -138,6 +144,8 @@ export default function SwapScreen() {
     const handleSubmit = async () => {
         if (!isFormValid || !currentType || !desiredType) return;
         setLoading(true);
+
+        await initMeshBridge(); // Ensure active before broadcasting
 
         try {
             const swap = await createLocalSwap({

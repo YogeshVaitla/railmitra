@@ -157,7 +157,7 @@ app.post('/api/swaps', async (req, res) => {
         const swap = await prisma.swapRequest.create({
             data: {
                 trainNo,
-                userId: hashPNR(userId),
+                userId,
                 currentCoachId,
                 currentSeatNo,
                 currentSeatType,
@@ -174,7 +174,7 @@ app.post('/api/swaps', async (req, res) => {
             data: {
                 swapId: swap.id,
                 eventType: 'CREATED',
-                actorId: hashPNR(userId),
+                actorId: userId,
                 metadata: JSON.stringify({ reason, priorityScore }),
             },
         });
