@@ -282,7 +282,7 @@ export class CloudSyncBridge implements IMeshBridge {
         try {
             const response = await fetch(
                 `${SYNC_SERVER_URL}/api/swaps/${this.trainNo}/${this.journeyDate}/browse`,
-                { signal: AbortSignal.timeout(5000) }
+                { signal: AbortSignal.timeout(30000) } // Render free tier can take 30s to wake up!
             );
 
             if (!response.ok) {
@@ -367,7 +367,7 @@ export class CloudSyncBridge implements IMeshBridge {
             const response = await fetch(`${SYNC_SERVER_URL}/api/swaps`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(5000),
+                signal: AbortSignal.timeout(30000), // Render cold start
                 body: JSON.stringify({
                     trainNo: swap.trainNo,
                     userId: this.deviceId,
@@ -417,7 +417,7 @@ export class CloudSyncBridge implements IMeshBridge {
             fetch(`${SYNC_SERVER_URL}/api/swaps/${serverId}/accept`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(5000),
+                signal: AbortSignal.timeout(30000), // Render cold start
             }).catch(() => { });
         }
     }
@@ -428,7 +428,7 @@ export class CloudSyncBridge implements IMeshBridge {
             fetch(`${SYNC_SERVER_URL}/api/swaps/${serverId}/cancel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(5000),
+                signal: AbortSignal.timeout(30000), // Render cold start
             }).catch(() => { });
         }
     }
