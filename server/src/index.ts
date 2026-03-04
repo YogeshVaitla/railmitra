@@ -124,6 +124,20 @@ app.post('/api/swaps', async (req, res) => {
     try {
         const { trainNo, userId, currentCoachId, currentSeatNo, currentSeatType, desiredSeatType, journeyDate, reason } = req.body;
 
+        // Duplicate check: same seat on same train+date can't have two active offers
+        const existingOffer = await prisma.swapRequest.findFirst({
+            where: {
+                trainNo,
+                journeyDate,
+                currentCoachId,
+                currentSeatNo,
+                status: 'OPEN',
+            },
+        });
+        if (existingOffer) {
+            return res.status(409).json({ error: `Seat ${currentCoachId}/${currentSeatNo} already has an active swap offer on this train.` });
+        }
+
         // Compute priority score based on reason
         const reasonBonuses: Record<string, number> = { elderly: 0.30, medical: 0.25, family: 0.15, preference: 0.05 };
         const priorityScore = 0.20 + (reasonBonuses[reason] || 0.05);

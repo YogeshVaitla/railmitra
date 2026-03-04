@@ -9,6 +9,7 @@
  * - version, type, senderId, trainNo, timestamp, ttl, payload
  */
 
+import { NearbyMeshBridge } from './NearbyMeshBridge';
 import { getOrCreateDeviceId, LocalSwap, mergeRemoteSwaps, SeatType, SwapReason } from './swapStore';
 
 // --- Types ---
@@ -389,8 +390,24 @@ export class CloudSyncBridge implements IMeshBridge {
         }
     }
 
-    broadcastSwapAccept(swapId: string, _matchedSwapId: string): void {
-        const serverId = this.serverSwapIdMap.get(swapId);
+    // Resolve a local swap ID to the server's database ID.
+    // Checks the local→server map first, then tries cloud_ prefix extraction.
+    private resolveServerId(localId: string): string | null {
+        // Check the explicit mapping (set when we POST our own offer)
+        const mapped = this.serverSwapIdMap.get(localId);
+        if (mapped) return String(mapped);
+
+        // Cloud-synced offers have IDs like "cloud_42" — the number IS the server ID
+        if (localId.startsWith('cloud_')) {
+            return localId.replace('cloud_', '');
+        }
+
+        return null;
+    }
+
+    broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
+        // Accept the OTHER person's swap on the server
+        const serverId = this.resolveServerId(matchedSwapId);
         if (serverId) {
             fetch(`${SYNC_SERVER_URL}/api/swaps/${serverId}/accept`, {
                 method: 'POST',
@@ -401,7 +418,7 @@ export class CloudSyncBridge implements IMeshBridge {
     }
 
     broadcastSwapCancel(swapId: string): void {
-        const serverId = this.serverSwapIdMap.get(swapId);
+        const serverId = this.resolveServerId(swapId);
         if (serverId) {
             fetch(`${SYNC_SERVER_URL}/api/swaps/${serverId}/cancel`, {
                 method: 'POST',
@@ -438,17 +455,123 @@ export class CloudSyncBridge implements IMeshBridge {
 }
 
 /**
- * Factory function — returns the appropriate bridge implementation.
+ * Hybrid bridge — runs BOTH P2P and cloud sync simultaneously.
  * 
- * For beta with cloud sync: returns CloudSyncBridge (polls server).
- * For dev testing: swap to MockMeshBridge to simulate fake peers.
- * For production (when native module is ready): use real NearbyConnectionsBridge.
+ * P2P handles nearby passengers (no internet needed).
+ * Cloud handles passengers who aren't physically close yet.
+ * Both feed into the same swap store — no duplicates because
+ * mergeRemoteSwaps() deduplicates by swap ID prefix (p2p_ vs cloud_).
  */
-export function createMeshBridge(): IMeshBridge {
-    // BETA: cloud sync for multi-user testing
-    return new CloudSyncBridge();
 
-    // DEV TESTING: uncomment to simulate fake peers and offers
-    // return new MockMeshBridge();
+export class HybridMeshBridge implements IMeshBridge {
+    private nearbyBridge: NearbyMeshBridge;
+    private cloudBridge: CloudSyncBridge;
+    private swapCallbacks: SwapReceivedCallback[] = [];
+    private peerCallbacks: PeerCountCallback[] = [];
+    private nearbyPeerCount = 0;
+    private cloudPeerCount = 0;
+
+    constructor() {
+        this.nearbyBridge = new NearbyMeshBridge();
+        this.cloudBridge = new CloudSyncBridge();
+
+        // Forward swap events from both bridges
+        this.nearbyBridge.onSwapReceived((swaps) => {
+            this.swapCallbacks.forEach(cb => cb(swaps));
+        });
+        this.cloudBridge.onSwapReceived((swaps) => {
+            this.swapCallbacks.forEach(cb => cb(swaps));
+        });
+
+        // Combine peer counts from both channels
+        this.nearbyBridge.onPeerCountChanged((count) => {
+            this.nearbyPeerCount = count;
+            this.peerCallbacks.forEach(cb => cb(this.nearbyPeerCount + this.cloudPeerCount));
+        });
+        this.cloudBridge.onPeerCountChanged((count) => {
+            this.cloudPeerCount = count;
+            this.peerCallbacks.forEach(cb => cb(this.nearbyPeerCount + this.cloudPeerCount));
+        });
+    }
+
+    async startAdvertising(trainNo: string, journeyDate: string): Promise<void> {
+        // Start both simultaneously
+        await Promise.allSettled([
+            this.nearbyBridge.startAdvertising(trainNo, journeyDate),
+            this.cloudBridge.startAdvertising(trainNo, journeyDate),
+        ]);
+    }
+
+    async startDiscovery(trainNo: string, journeyDate: string): Promise<void> {
+        await Promise.allSettled([
+            this.nearbyBridge.startDiscovery(trainNo, journeyDate),
+            this.cloudBridge.startDiscovery(trainNo, journeyDate),
+        ]);
+    }
+
+    broadcastSwapOffer(swap: LocalSwap): void {
+        // Broadcast through both channels
+        this.nearbyBridge.broadcastSwapOffer(swap);
+        this.cloudBridge.broadcastSwapOffer(swap);
+    }
+
+    broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
+        this.nearbyBridge.broadcastSwapAccept(swapId, matchedSwapId);
+        this.cloudBridge.broadcastSwapAccept(swapId, matchedSwapId);
+    }
+
+    broadcastSwapCancel(swapId: string): void {
+        this.nearbyBridge.broadcastSwapCancel(swapId);
+        this.cloudBridge.broadcastSwapCancel(swapId);
+    }
+
+    onSwapReceived(callback: SwapReceivedCallback): void {
+        this.swapCallbacks.push(callback);
+    }
+
+    onPeerCountChanged(callback: PeerCountCallback): void {
+        this.peerCallbacks.push(callback);
+    }
+
+    getPeerCount(): number {
+        return this.nearbyPeerCount + this.cloudPeerCount;
+    }
+
+    getConnectedPeers(): MeshPeer[] {
+        return [
+            ...this.nearbyBridge.getConnectedPeers(),
+            ...this.cloudBridge.getConnectedPeers(),
+        ];
+    }
+
+    isActive(): boolean {
+        return this.nearbyBridge.isActive() || this.cloudBridge.isActive();
+    }
+
+    stop(): void {
+        this.nearbyBridge.stop();
+        this.cloudBridge.stop();
+        this.swapCallbacks = [];
+        this.peerCallbacks = [];
+        this.nearbyPeerCount = 0;
+        this.cloudPeerCount = 0;
+    }
 }
 
+/**
+ * Factory function — returns the appropriate bridge implementation.
+ * 
+ * Default: HybridMeshBridge (P2P + Cloud running together).
+ * For cloud-only: return new CloudSyncBridge().
+ * For dev testing: return new MockMeshBridge().
+ */
+export function createMeshBridge(): IMeshBridge {
+    // PRODUCTION: hybrid — P2P for nearby, cloud for remote
+    return new HybridMeshBridge();
+
+    // CLOUD ONLY: uncomment if P2P causes issues
+    // return new CloudSyncBridge();
+
+    // DEV TESTING: uncomment to simulate fake peers
+    // return new MockMeshBridge();
+}

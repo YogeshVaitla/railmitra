@@ -74,6 +74,7 @@ export default function SwapScreen() {
     const [reason, setReason] = useState<SwapReason>('preference');
     const [loading, setLoading] = useState(false);
     const [submitted, setSubmitted] = useState(false);
+    const [mySwapId, setMySwapId] = useState<string | null>(null);
 
     // --- Matches State ---
     const [matches, setMatches] = useState<SwapMatch[]>([]);
@@ -149,9 +150,14 @@ export default function SwapScreen() {
             });
 
             meshRef.current?.broadcastSwapOffer(swap);
+            setMySwapId(swap.id); // Track for cancel button
             setLoading(false);
             setSubmitted(true);
             setShowRegisterForm(false);
+
+            // Refresh offers so our swap appears in the list
+            const updatedOffers = await browseOffers(trainNo, journeyDate);
+            setOffers(updatedOffers);
 
             Animated.timing(fadeAnim, {
                 toValue: 1, duration: 500, useNativeDriver: true,
@@ -262,6 +268,7 @@ export default function SwapScreen() {
         setReason('preference');
         setMatches([]); setAcceptedIds([]);
         setAnalytics(null); setShowAnalytics(false);
+        setMySwapId(null);
         fadeAnim.setValue(0);
     };
 
@@ -674,8 +681,12 @@ export default function SwapScreen() {
 
                                     <TouchableOpacity
                                         onPress={() => {
-                                            const mySwaps = offers.filter(o => o.deviceId === deviceId);
-                                            if (mySwaps.length > 0) handleCancelSwap(mySwaps[0].id);
+                                            if (mySwapId) {
+                                                handleCancelSwap(mySwapId);
+                                            } else {
+                                                const mySwaps = offers.filter(o => o.deviceId === deviceId);
+                                                if (mySwaps.length > 0) handleCancelSwap(mySwaps[0].id);
+                                            }
                                         }}
                                         style={styles.cancelBtn}
                                     >
