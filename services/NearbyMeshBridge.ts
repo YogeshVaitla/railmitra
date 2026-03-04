@@ -8,7 +8,7 @@
  * This ensures only passengers on the same train discover each other.
  */
 
-import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
+import { NativeEventEmitter, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import {
     IMeshBridge,
     MeshPeer,
@@ -45,11 +45,49 @@ export class NearbyMeshBridge implements IMeshBridge {
         return Platform.OS === 'android' && NearbyConnections != null;
     }
 
+    /**
+     * Request all required Android runtime permissions for Nearby Connections.
+     */
+    private async requestPermissions(): Promise<boolean> {
+        if (Platform.OS !== 'android') return true;
+
+        try {
+            const permissionsToRequest = [
+                PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+                // Android 12+ (API 31+) required permissions
+                'android.permission.BLUETOOTH_SCAN',
+                'android.permission.BLUETOOTH_ADVERTISE',
+                'android.permission.BLUETOOTH_CONNECT',
+                // Android 13+ (API 33+) required permissions
+                'android.permission.NEARBY_WIFI_DEVICES',
+            ];
+
+            const granted = await PermissionsAndroid.requestMultiple(permissionsToRequest as any[]);
+
+            // Just log the results, Location is the absolute strict one, others depend on Android version
+            console.log('[NearbyP2P] Permission results:', granted);
+
+            // If location is denied, Nearby Connections fundamentally won't work on most devices
+            if (granted[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === PermissionsAndroid.RESULTS.DENIED) {
+                console.warn('[NearbyP2P] Location permission denied, P2P will likely fail.');
+                return false;
+            }
+
+            return true;
+        } catch (err) {
+            console.warn('[NearbyP2P] Error requesting permissions:', err);
+            return false;
+        }
+    }
+
     async startAdvertising(trainNo: string, journeyDate: string): Promise<void> {
         if (!NearbyMeshBridge.isAvailable()) {
             console.log('[NearbyP2P] Native module not available, skipping');
             return;
         }
+
+        const hasPermissions = await this.requestPermissions();
+        if (!hasPermissions) return;
 
         this.trainNo = trainNo;
         this.journeyDate = journeyDate;
@@ -74,6 +112,9 @@ export class NearbyMeshBridge implements IMeshBridge {
             console.log('[NearbyP2P] Native module not available, skipping');
             return;
         }
+
+        const hasPermissions = await this.requestPermissions();
+        if (!hasPermissions) return;
 
         this.trainNo = trainNo;
         this.journeyDate = journeyDate;
