@@ -32,6 +32,18 @@ app.get('/api/health', (_req, res) => {
     });
 });
 
+// Friendly root endpoint so standard browser visits don't throw 404
+app.get('/', (_req, res) => {
+    res.send(`
+        <html>
+            <body style="font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f9f9f9;">
+                <h1 style="color: #ff6b35;">🚄 Seat Swap Sync Server is Live!</h1>
+                <p>Version 1.0.0</p>
+            </body>
+        </html>
+    `);
+});
+
 // --- SEAT REPORTS ---
 
 // When a user sees a seat is empty (or not), this is where it goes.
