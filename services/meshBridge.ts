@@ -235,9 +235,33 @@ export class MockMeshBridge implements IMeshBridge {
  */
 
 // Server URL — change this to your computer's IP for phone testing
-// e.g. 'http://192.168.1.5:3001' for local network
+// e.g. 'http://192.168.1.5:3001'// Default local config
 const SYNC_SERVER_URL = 'https://railmitra-api.onrender.com';
 const POLL_INTERVAL_MS = 15000; // Check for new offers every 15 seconds
+
+/**
+ * React Native / Hermes often lacks support for `AbortSignal.timeout()`.
+ * This is a reliable wrapper to enforce fetch timeouts.
+ */
+async function fetchWithTimeout(url: string, options: RequestInit & { timeout?: number } = {}): Promise<Response> {
+    const { timeout = 30000, ...fetchOptions } = options;
+
+    // Fallback if AbortController isn't fully supported
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const id = setTimeout(() => controller?.abort(), timeout);
+
+    try {
+        const response = await fetch(url, {
+            ...fetchOptions,
+            signal: controller?.signal
+        });
+        clearTimeout(id);
+        return response;
+    } catch (error) {
+        clearTimeout(id);
+        throw error;
+    }
+}
 
 export class CloudSyncBridge implements IMeshBridge {
     private active = false;
@@ -280,9 +304,9 @@ export class CloudSyncBridge implements IMeshBridge {
 
     private async fetchOffersFromServer(): Promise<void> {
         try {
-            const response = await fetch(
+            const response = await fetchWithTimeout(
                 `${SYNC_SERVER_URL}/api/swaps/${this.trainNo}/${this.journeyDate}/browse`,
-                { signal: AbortSignal.timeout(30000) } // Render free tier can take 30s to wake up!
+                { timeout: 30000 } // Render free tier can take 30s to wake up!
             );
 
             if (!response.ok) {
@@ -364,10 +388,10 @@ export class CloudSyncBridge implements IMeshBridge {
 
     private async postOfferToServer(swap: LocalSwap): Promise<void> {
         try {
-            const response = await fetch(`${SYNC_SERVER_URL}/api/swaps`, {
+            const response = await fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(30000), // Render cold start
+                timeout: 30000, // Render cold start
                 body: JSON.stringify({
                     trainNo: swap.trainNo,
                     userId: this.deviceId,
@@ -414,10 +438,10 @@ export class CloudSyncBridge implements IMeshBridge {
         // Accept the OTHER person's swap on the server
         const serverId = this.resolveServerId(matchedSwapId);
         if (serverId) {
-            fetch(`${SYNC_SERVER_URL}/api/swaps/${serverId}/accept`, {
+            fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps/${serverId}/accept`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(30000), // Render cold start
+                timeout: 30000, // Render cold start
             }).catch(() => { });
         }
     }
@@ -425,10 +449,10 @@ export class CloudSyncBridge implements IMeshBridge {
     broadcastSwapCancel(swapId: string): void {
         const serverId = this.resolveServerId(swapId);
         if (serverId) {
-            fetch(`${SYNC_SERVER_URL}/api/swaps/${serverId}/cancel`, {
+            fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps/${serverId}/cancel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(30000), // Render cold start
+                timeout: 30000, // Render cold start
             }).catch(() => { });
         }
     }
