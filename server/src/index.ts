@@ -148,6 +148,8 @@ app.post('/api/swaps', async (req, res) => {
     try {
         const { trainNo, userId, currentCoachId, currentSeatNo, currentSeatType, desiredSeatType, journeyDate, reason } = req.body;
 
+        console.log(`[+] New swap offer received from ${userId.substring(0, 8)} for train ${trainNo} (${currentCoachId}-${currentSeatNo} -> ${desiredSeatType})`);
+
         // Duplicate check: same seat on same train+date can't have two active offers
         const existingOffer = await prisma.swapRequest.findFirst({
             where: {
