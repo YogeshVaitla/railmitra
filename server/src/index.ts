@@ -131,6 +131,18 @@ app.get('/api/classify/:classType/:highestSeat', (req, res) => {
 // using the local swapStore + swapEngine + meshBridge. When internet is
 // available, the app can sync with this server for broader discovery.
 
+app.get('/api/debug/swaps', async (_req, res) => {
+    try {
+        const recentSwaps = await prisma.swapRequest.findMany({
+            orderBy: { createdAt: 'desc' },
+            take: 10
+        });
+        res.json(recentSwaps);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Register someone's wish to swap seats (with priority scoring)
 app.post('/api/swaps', async (req, res) => {
     try {
