@@ -236,8 +236,9 @@ function validateSwapInput(params: {
 function isValidRemoteSwap(swap: any): boolean {
     // Validate structure of a swap received via mesh or cloud
     if (!swap || typeof swap !== 'object') return false;
-    if (typeof swap.id !== 'string' || swap.id.length < 8) return false;
-    if (typeof swap.deviceId !== 'string' || swap.deviceId.length < 8) return false;
+    // Cloud IDs can be short like "cloud_5" (7 chars), so we allow minimum 3
+    if (typeof swap.id !== 'string' || swap.id.length < 3) return false;
+    if (typeof swap.deviceId !== 'string' || swap.deviceId.length < 3) return false;
     if (!/^\d{4,5}$/.test(swap.trainNo)) return false;
     if (typeof swap.currentSeatNo !== 'number' || swap.currentSeatNo < 1 || swap.currentSeatNo > MAX_SEAT_NUMBER) return false;
     if (!VALID_SEAT_TYPES.includes(swap.currentSeatType)) return false;
