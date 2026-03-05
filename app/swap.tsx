@@ -43,14 +43,19 @@ const SEAT_TYPES: { id: SeatType; label: string; icon: string }[] = [
     { id: 'SIDE_UPPER', label: 'Side Upper', icon: 'arrow-up-outline' },
 ];
 
-const REASONS: { id: SwapReason; label: string; icon: string; emoji: string }[] = [
-    { id: 'elderly', label: 'Elderly', icon: 'accessibility-outline', emoji: '👴' },
-    { id: 'medical', label: 'Medical', icon: 'medkit-outline', emoji: '🏥' },
-    { id: 'family', label: 'Family', icon: 'people-outline', emoji: '👨‍👩‍👧' },
-    { id: 'preference', label: 'Preference', icon: 'heart-outline', emoji: '💜' },
+const REASONS: { id: SwapReason; label: string; emoji: string }[] = [
+    { id: 'elderly', label: 'Elderly', emoji: '👴' },
+    { id: 'medical', label: 'Medical', emoji: '🏥' },
+    { id: 'family', label: 'Family', emoji: '👨‍👩‍👧' },
+    { id: 'preference', label: 'Preference', emoji: '💜' },
 ];
 
+type TabType = 'browse' | 'register' | 'myswap';
+
 export default function SwapScreen() {
+    // --- Tab State ---
+    const [activeTab, setActiveTab] = useState<TabType>('browse');
+
     // --- Core State ---
     const [trainNo, setTrainNo] = useState('');
     const [journeyDate] = useState(new Date().toISOString().split('T')[0]);
@@ -67,7 +72,6 @@ export default function SwapScreen() {
     const [hasBrowsed, setHasBrowsed] = useState(false);
 
     // --- Register Form State ---
-    const [showRegisterForm, setShowRegisterForm] = useState(false);
     const [coachId, setCoachId] = useState('');
     const [seatNo, setSeatNo] = useState('');
     const [currentType, setCurrentType] = useState<SeatType | ''>('');
@@ -81,19 +85,26 @@ export default function SwapScreen() {
     const [matches, setMatches] = useState<SwapMatch[]>([]);
     const [matchLoading, setMatchLoading] = useState(false);
     const [acceptedIds, setAcceptedIds] = useState<string[]>([]);
+    const [hasNewMatch, setHasNewMatch] = useState(false);
 
     // --- Analytics State ---
     const [analytics, setAnalytics] = useState<SwapAnalytics | null>(null);
-    const [showAnalytics, setShowAnalytics] = useState(false);
 
     // --- Notification ---
     const [notification, setNotification] = useState<string | null>(null);
-    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const fadeAnim = useRef(new Animated.Value(1)).current;
+
+    const isFormValid =
+        trainNo.length >= 4 &&
+        coachId &&
+        seatNo &&
+        currentType &&
+        desiredType &&
+        currentType !== desiredType;
 
     // --- Init ---
     useEffect(() => {
         getOrCreateDeviceId().then(setDeviceId);
-        // Clean up any mock swap data from dev testing
         clearMockSwapData();
 
         // Restore active swap registration if user navigated away
@@ -109,7 +120,7 @@ export default function SwapScreen() {
                         setSeatNo(saved.seatNo || '');
                         setCurrentType(saved.currentType || '');
                         setDesiredType(saved.desiredType || '');
-                        setHasBrowsed(true);
+                        setActiveTab('myswap');
                     }
                 } catch { }
             }
@@ -118,15 +129,7 @@ export default function SwapScreen() {
         return () => { meshRef.current?.stop(); };
     }, []);
 
-    const isFormValid =
-        trainNo.length >= 4 &&
-        coachId &&
-        seatNo &&
-        currentType &&
-        desiredType &&
-        currentType !== desiredType;
-
-    // --- Handlers (logic preserved exactly) ---
+    // --- Handlers ---
 
     const initMeshBridge = async () => {
         if (!trainNo || trainNo.length < 4) return;
@@ -139,8 +142,9 @@ export default function SwapScreen() {
             });
             mesh.onSwapReceived((newSwaps) => {
                 browseOffers(trainNo, journeyDate).then(setOffers);
-                handleFindMatches(); // Auto-refresh matches when background sync receives offers
-                showNotification(`📡 ${newSwaps.length} new offer${newSwaps.length > 1 ? 's' : ''} from nearby passengers`);
+                handleFindMatches();
+                setHasNewMatch(true);
+                showNotification(`📡 ${newSwaps.length} new offer${newSwaps.length > 1 ? 's' : ''} synced`);
             });
             await mesh.startAdvertising(trainNo, journeyDate);
             await mesh.startDiscovery(trainNo, journeyDate);
@@ -167,7 +171,7 @@ export default function SwapScreen() {
         if (!isFormValid || !currentType || !desiredType) return;
         setLoading(true);
 
-        await initMeshBridge(); // Ensure active before broadcasting
+        await initMeshBridge();
 
         try {
             const swap = await createLocalSwap({
@@ -180,32 +184,26 @@ export default function SwapScreen() {
             });
 
             meshRef.current?.broadcastSwapOffer(swap);
-            setMySwapId(swap.id); // Track for cancel button
+            setMySwapId(swap.id);
             setLoading(false);
             setSubmitted(true);
-            setShowRegisterForm(false);
 
-            // Persist across navigation so the card stays visible
+            // Persist across navigation
             AsyncStorage.setItem('activeSwap', JSON.stringify({
                 mySwapId: swap.id, trainNo, coachId, seatNo, currentType, desiredType,
             }));
 
-            // Refresh offers so our swap appears in the list
+            // Auto-switch to My Swap tab
+            setActiveTab('myswap');
+            showNotification('✅ Swap registered! Looking for matches...');
+
+            // Refresh offers + matches
             const updatedOffers = await browseOffers(trainNo, journeyDate);
             setOffers(updatedOffers);
-
-            Animated.timing(fadeAnim, {
-                toValue: 1, duration: 500, useNativeDriver: true,
-            }).start();
-
             handleFindMatches();
         } catch (error: any) {
             setLoading(false);
-            Alert.alert(
-                'Can\'t Register',
-                error.message || 'Something went wrong. Please try again.',
-                [{ text: 'OK' }]
-            );
+            Alert.alert('Can\'t Register', error.message || 'Something went wrong.');
         }
     };
 
@@ -226,19 +224,22 @@ export default function SwapScreen() {
         const seatType = getSeatTypeLabel(otherParticipant.has);
 
         Alert.alert(
-            'Confirm Swap',
-            `Accept swap with ${seatInfo} (${seatType})? The other passenger will be notified via mesh.`,
+            'Accept This Swap?',
+            `You'll swap your seat with ${seatInfo} (${seatType})`,
             [
-                { text: 'Cancel', style: 'cancel' },
+                { text: 'Not Now', style: 'cancel' },
                 {
-                    text: 'Accept',
+                    text: 'Accept Swap',
                     onPress: async () => {
-                        const success = await acceptMatch(myParticipant.swapId, otherParticipant.swapId);
-                        if (success) {
-                            setAcceptedIds(prev => [...prev, match.id]);
-                            meshRef.current?.broadcastSwapAccept(myParticipant.swapId, otherParticipant.swapId);
-                            showNotification(`✅ Swap accepted! ${seatInfo} (${seatType}) ↔ Your seat.`);
-                        }
+                        await acceptMatch(myParticipant.swapId, otherParticipant.swapId);
+                        meshRef.current?.broadcastSwapAccept(otherParticipant.swapId, myParticipant.swapId);
+                        setAcceptedIds(prev => [...prev, match.id]);
+                        showNotification(`✅ Swap accepted! ${seatInfo} (${seatType}) ↔ Your seat.`);
+
+                        // Refresh browse to remove accepted offers
+                        const updatedOffers = await browseOffers(trainNo, journeyDate);
+                        setOffers(updatedOffers);
+                        handleFindMatches();
                     },
                 },
             ]
@@ -286,26 +287,39 @@ export default function SwapScreen() {
         return `${Math.floor(mins / 60)}h ${mins % 60}m left`;
     };
 
-    const getReasonEmoji = (r: string) => REASONS.find(rs => rs.id === r)?.emoji || '💜';
+    const getReasonEmoji = (r: string) => REASONS.find(x => x.id === r)?.emoji || '💜';
 
     const getPriorityColor = (score: number) => {
-        if (score >= 0.6) return Colors.success.start;
+        if (score >= 0.7) return Colors.danger.start;
         if (score >= 0.4) return Colors.warning.start;
-        return Colors.text.tertiary;
+        return Colors.success.start;
     };
 
     const handleReset = () => {
         setSubmitted(false);
-        setShowRegisterForm(false);
         setHasBrowsed(false);
         setOffers([]);
-        setTrainNo(''); setCoachId(''); setSeatNo('');
+        setCoachId(''); setSeatNo('');
         setCurrentType(''); setDesiredType('');
         setReason('preference');
         setMatches([]); setAcceptedIds([]);
-        setAnalytics(null); setShowAnalytics(false);
+        setAnalytics(null);
         setMySwapId(null);
-        fadeAnim.setValue(0);
+        setActiveTab('browse');
+    };
+
+    // Auto-browse when switching to Browse tab
+    const switchTab = (tab: TabType) => {
+        setActiveTab(tab);
+        if (tab === 'browse' && trainNo.length >= 4) {
+            handleBrowse();
+        }
+        if (tab === 'myswap') {
+            setHasNewMatch(false);
+            if (submitted && trainNo.length >= 4) {
+                handleFindMatches();
+            }
+        }
     };
 
     // --- Render ---
@@ -340,25 +354,7 @@ export default function SwapScreen() {
                     </View>
                 </View>
 
-                {/* Info Banner */}
-                <View style={styles.infoBanner}>
-                    <LinearGradient
-                        colors={[Colors.primary.start, Colors.primary.end]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.infoGradient}
-                    >
-                        <MaterialCommunityIcons name="swap-horizontal-bold" size={26} color="#fff" />
-                        <View style={styles.infoContent}>
-                            <Text style={styles.infoTitle}>P2P Seat Exchange</Text>
-                            <Text style={styles.infoDesc}>
-                                Register your swap offer and find matching passengers on the same train. Offers sync automatically.
-                            </Text>
-                        </View>
-                    </LinearGradient>
-                </View>
-
-                {/* Mesh Banner */}
+                {/* Connection Banner */}
                 {meshActive && peerCount > 0 && (
                     <View style={styles.meshBanner}>
                         <View style={styles.meshBannerDot} />
@@ -368,23 +364,61 @@ export default function SwapScreen() {
                     </View>
                 )}
 
-                {/* Step 1: Train Number + Browse */}
+                {/* Train Number (always visible) */}
                 <View style={styles.card}>
-                    <Text style={styles.sectionLabel}>FIND SWAP OFFERS</Text>
-                    <View style={styles.formRow}>
-                        <View style={[styles.formField, { flex: 1 }]}>
-                            <Text style={styles.fieldLabel}>Train No.</Text>
-                            <TextInput
-                                style={styles.fieldInput}
-                                placeholder="12301"
-                                placeholderTextColor={Colors.text.tertiary}
-                                value={trainNo}
-                                onChangeText={setTrainNo}
-                                keyboardType="number-pad"
-                                maxLength={5}
-                                editable={!submitted}
-                            />
-                        </View>
+                    <Text style={styles.sectionLabel}>TRAIN NUMBER</Text>
+                    <TextInput
+                        style={styles.fieldInput}
+                        placeholder="Enter train number (e.g. 12301)"
+                        placeholderTextColor={Colors.text.tertiary}
+                        value={trainNo}
+                        onChangeText={setTrainNo}
+                        keyboardType="number-pad"
+                        maxLength={5}
+                        editable={!submitted}
+                    />
+                </View>
+
+                {/* Tabs */}
+                <View style={styles.tabBar}>
+                    {[
+                        { key: 'browse' as TabType, label: 'Browse', icon: 'search-outline' },
+                        { key: 'register' as TabType, label: 'Register', icon: 'add-circle-outline' },
+                        { key: 'myswap' as TabType, label: 'My Swap', icon: 'swap-horizontal-outline' },
+                    ].map(tab => (
+                        <TouchableOpacity
+                            key={tab.key}
+                            style={[styles.tab, activeTab === tab.key && styles.tabActive]}
+                            onPress={() => switchTab(tab.key)}
+                        >
+                            <View style={{ position: 'relative' }}>
+                                <Ionicons
+                                    name={tab.icon as any}
+                                    size={18}
+                                    color={activeTab === tab.key ? Colors.primary.start : Colors.text.tertiary}
+                                />
+                                {tab.key === 'myswap' && (hasNewMatch || submitted) && (
+                                    <View style={[
+                                        styles.tabBadge,
+                                        hasNewMatch && { backgroundColor: Colors.danger.start },
+                                        !hasNewMatch && submitted && { backgroundColor: Colors.success.start },
+                                    ]} />
+                                )}
+                            </View>
+                            <Text style={[
+                                styles.tabText,
+                                activeTab === tab.key && styles.tabTextActive,
+                            ]}>
+                                {tab.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                {/* ======= TAB: BROWSE ======= */}
+                {activeTab === 'browse' && (
+                    <View>
+                        {/* Browse Button */}
                         <TouchableOpacity
                             onPress={handleBrowse}
                             disabled={!trainNo || trainNo.length < 4 || browseLoading}
@@ -399,329 +433,277 @@ export default function SwapScreen() {
                                 ) : (
                                     <>
                                         <Ionicons name="search" size={16} color="#fff" />
-                                        <Text style={styles.browseBtnText}>Browse</Text>
+                                        <Text style={styles.browseBtnText}>Find Swap Offers</Text>
                                     </>
                                 )}
                             </LinearGradient>
                         </TouchableOpacity>
-                    </View>
-                </View>
 
-                {/* Browse Results */}
-                {hasBrowsed && (
-                    <>
-                        <View style={styles.browseHeader}>
-                            <Text style={styles.browseTitle}>
-                                {offers.length > 0
-                                    ? `${offers.length} Swap Offers Available`
-                                    : 'No Swap Offers Yet'}
-                            </Text>
-                            <View style={{ flexDirection: 'row', gap: 8 }}>
-                                {analytics && (
-                                    <TouchableOpacity
-                                        onPress={() => setShowAnalytics(!showAnalytics)}
-                                        style={[styles.iconBtn, showAnalytics && { backgroundColor: Colors.accent.light }]}
-                                    >
-                                        <Ionicons name="analytics" size={16} color={Colors.accent.start} />
-                                    </TouchableOpacity>
-                                )}
-                                <TouchableOpacity onPress={handleBrowse} style={styles.iconBtn}>
-                                    <Ionicons name="refresh" size={16} color={Colors.primary.start} />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-
-                        {/* Analytics Panel */}
-                        {showAnalytics && analytics && (
-                            <View style={styles.analyticsCard}>
-                                <Text style={styles.analyticsSectionLabel}>DEMAND HEATMAP</Text>
-                                <View style={styles.heatmapGrid}>
-                                    {Object.entries(analytics.demandHeatmap).map(([type, data]) => (
-                                        <View key={type} style={styles.heatmapItem}>
-                                            <Text style={styles.heatmapLabel}>{getSeatTypeLabel(type)}</Text>
-                                            <View style={styles.heatmapBars}>
-                                                <View style={styles.heatmapBarRow}>
-                                                    <Text style={styles.heatmapBarLabel}>Want</Text>
-                                                    <View style={[styles.heatmapBar, styles.heatmapBarWant, { width: Math.max(4, data.wanted * 20) }]} />
-                                                    <Text style={styles.heatmapBarCount}>{data.wanted}</Text>
-                                                </View>
-                                                <View style={styles.heatmapBarRow}>
-                                                    <Text style={styles.heatmapBarLabel}>Have</Text>
-                                                    <View style={[styles.heatmapBar, styles.heatmapBarHave, { width: Math.max(4, data.offered * 20) }]} />
-                                                    <Text style={styles.heatmapBarCount}>{data.offered}</Text>
-                                                </View>
-                                            </View>
-                                        </View>
-                                    ))}
-                                </View>
-                                <View style={styles.analyticsStats}>
-                                    <View style={styles.analyticsStat}>
-                                        <Text style={styles.analyticsStatValue}>{analytics.totalOffers}</Text>
-                                        <Text style={styles.analyticsStatLabel}>Total</Text>
-                                    </View>
-                                    <View style={styles.analyticsStat}>
-                                        <Text style={styles.analyticsStatValue}>{analytics.activeOffers}</Text>
-                                        <Text style={styles.analyticsStatLabel}>Active</Text>
-                                    </View>
-                                    <View style={styles.analyticsStat}>
-                                        <Text style={[styles.analyticsStatValue, { color: Colors.success.start }]}>{analytics.completedSwaps}</Text>
-                                        <Text style={styles.analyticsStatLabel}>Done</Text>
-                                    </View>
-                                    <View style={styles.analyticsStat}>
-                                        <Text style={styles.analyticsStatValue}>{Math.round(analytics.successRate * 100)}%</Text>
-                                        <Text style={styles.analyticsStatLabel}>Rate</Text>
-                                    </View>
-                                </View>
-                            </View>
-                        )}
-
-                        {offers.length > 0 ? (
-                            offers.map((offer, idx) => (
-                                <View key={offer.id || idx} style={styles.offerCard}>
-                                    <View style={styles.offerTop}>
-                                        <View style={[styles.offerIconBox, { backgroundColor: Colors.primary.light }]}>
-                                            <MaterialCommunityIcons name="account-switch" size={18} color={Colors.primary.start} />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                <Text style={styles.offerSeat}>
-                                                    {offer.currentCoachId}/{offer.currentSeatNo}
-                                                </Text>
-                                                <Text style={{ fontSize: 12 }}>{getReasonEmoji(offer.reason)}</Text>
-                                                <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(offer.priorityScore) + '18' }]}>
-                                                    <Text style={[styles.priorityText, { color: getPriorityColor(offer.priorityScore) }]}>
-                                                        P{(offer.priorityScore * 10).toFixed(0)}
-                                                    </Text>
-                                                </View>
-                                            </View>
-                                            <Text style={styles.offerDetail}>
-                                                Has: {getSeatTypeLabel(offer.currentSeatType)} · Wants: {getSeatTypeLabel(offer.desiredSeatType)}
-                                            </Text>
-                                        </View>
-                                        <View style={{ alignItems: 'flex-end' }}>
-                                            <Text style={styles.offerTime}>{getTimeSince(offer.createdAt)}</Text>
-                                            <Text style={styles.expiryText}>{getTimeUntilExpiry(offer.expiresAt)}</Text>
-                                        </View>
-                                    </View>
-                                    <View style={styles.offerSwapVisual}>
-                                        <View style={styles.offerSwapChip}>
-                                            <Text style={styles.offerSwapChipText}>{getSeatTypeLabel(offer.currentSeatType)}</Text>
-                                        </View>
-                                        <Ionicons name="arrow-forward" size={14} color={Colors.text.tertiary} />
-                                        <View style={[styles.offerSwapChip, styles.offerSwapChipDesired]}>
-                                            <Text style={[styles.offerSwapChipText, { color: Colors.success.start }]}>{getSeatTypeLabel(offer.desiredSeatType)}</Text>
-                                        </View>
-                                    </View>
-                                </View>
-                            ))
-                        ) : (
-                            <View style={styles.emptyState}>
-                                <MaterialCommunityIcons name="swap-horizontal" size={40} color={Colors.divider} />
-                                <Text style={styles.emptyTitle}>No swap offers for this train yet</Text>
-                                <Text style={styles.emptySub}>Be the first to register one!</Text>
-                            </View>
-                        )}
-
-                        {/* Register Button / Form */}
-                        {!submitted && (
+                        {/* Results */}
+                        {hasBrowsed && (
                             <>
-                                <TouchableOpacity
-                                    onPress={() => setShowRegisterForm(!showRegisterForm)}
-                                    style={styles.registerToggle}
-                                >
-                                    <Ionicons
-                                        name={showRegisterForm ? 'chevron-up' : 'add-circle-outline'}
-                                        size={18}
-                                        color={Colors.primary.start}
-                                    />
-                                    <Text style={styles.registerToggleText}>
-                                        {showRegisterForm ? 'Hide Registration Form' : 'Register Your Swap Offer'}
+                                <View style={styles.browseHeader}>
+                                    <Text style={styles.browseTitle}>
+                                        {offers.length > 0
+                                            ? `${offers.length} Swap Offer${offers.length > 1 ? 's' : ''}`
+                                            : 'No Offers Yet'}
                                     </Text>
-                                </TouchableOpacity>
+                                    <TouchableOpacity onPress={handleBrowse} style={styles.iconBtn}>
+                                        <Ionicons name="refresh" size={16} color={Colors.primary.start} />
+                                    </TouchableOpacity>
+                                </View>
 
-                                {showRegisterForm && (
-                                    <View style={styles.card}>
-                                        <Text style={styles.sectionLabel}>YOUR SEAT DETAILS</Text>
-                                        <View style={styles.formRow}>
-                                            <View style={[styles.formField, { flex: 1 }]}>
-                                                <Text style={styles.fieldLabel}>Coach</Text>
-                                                <TextInput
-                                                    style={styles.fieldInput}
-                                                    placeholder="B3"
-                                                    placeholderTextColor={Colors.text.tertiary}
-                                                    value={coachId}
-                                                    onChangeText={setCoachId}
-                                                    autoCapitalize="characters"
-                                                    maxLength={4}
-                                                />
-                                            </View>
-                                            <View style={[styles.formField, { flex: 1 }]}>
-                                                <Text style={styles.fieldLabel}>Seat #</Text>
-                                                <TextInput
-                                                    style={styles.fieldInput}
-                                                    placeholder="42"
-                                                    placeholderTextColor={Colors.text.tertiary}
-                                                    value={seatNo}
-                                                    onChangeText={setSeatNo}
-                                                    keyboardType="number-pad"
-                                                    maxLength={3}
-                                                />
-                                            </View>
-                                        </View>
-
-                                        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>YOUR CURRENT BERTH</Text>
-                                        <View style={styles.typeGrid}>
-                                            {SEAT_TYPES.map(type => (
-                                                <TouchableOpacity
-                                                    key={type.id}
-                                                    onPress={() => setCurrentType(type.id)}
-                                                    style={[
-                                                        styles.typeChip,
-                                                        currentType === type.id && styles.typeChipActive,
-                                                    ]}
-                                                >
-                                                    <Ionicons
-                                                        name={type.icon as any}
-                                                        size={16}
-                                                        color={currentType === type.id ? '#fff' : Colors.text.tertiary}
-                                                    />
-                                                    <Text style={[
-                                                        styles.typeChipText,
-                                                        currentType === type.id && styles.typeChipTextActive,
-                                                    ]}>
-                                                        {type.label}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-
-                                        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>DESIRED BERTH</Text>
-                                        <View style={styles.typeGrid}>
-                                            {SEAT_TYPES.filter(t => t.id !== currentType).map(type => (
-                                                <TouchableOpacity
-                                                    key={type.id}
-                                                    onPress={() => setDesiredType(type.id)}
-                                                    style={[
-                                                        styles.typeChip,
-                                                        desiredType === type.id && styles.typeChipDesired,
-                                                    ]}
-                                                >
-                                                    <Ionicons
-                                                        name={type.icon as any}
-                                                        size={16}
-                                                        color={desiredType === type.id ? '#fff' : Colors.text.tertiary}
-                                                    />
-                                                    <Text style={[
-                                                        styles.typeChipText,
-                                                        desiredType === type.id && styles.typeChipTextActive,
-                                                    ]}>
-                                                        {type.label}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-
-                                        {/* Reason Selector */}
-                                        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>REASON (AFFECTS PRIORITY)</Text>
-                                        <View style={styles.typeGrid}>
-                                            {REASONS.map(r => (
-                                                <TouchableOpacity
-                                                    key={r.id}
-                                                    onPress={() => setReason(r.id)}
-                                                    style={[
-                                                        styles.typeChip,
-                                                        reason === r.id && styles.reasonChipActive,
-                                                    ]}
-                                                >
-                                                    <Text style={{ fontSize: 14 }}>{r.emoji}</Text>
-                                                    <Text style={[
-                                                        styles.typeChipText,
-                                                        reason === r.id && styles.typeChipTextActive,
-                                                    ]}>
-                                                        {r.label}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-
-                                        {/* Visual swap indicator */}
-                                        {currentType && desiredType && (
-                                            <View style={styles.swapPreview}>
-                                                <View style={styles.swapSide}>
-                                                    <Text style={styles.swapLabel}>You Have</Text>
-                                                    <Text style={styles.swapValue}>{getSeatTypeLabel(currentType)}</Text>
+                                {/* Demand Heatmap */}
+                                {analytics && (
+                                    <View style={styles.analyticsCard}>
+                                        <Text style={styles.analyticsSectionLabel}>DEMAND HEATMAP</Text>
+                                        <View style={styles.heatmapGrid}>
+                                            {Object.entries(analytics.demandHeatmap).map(([type, data]) => (
+                                                <View key={type} style={styles.heatmapItem}>
+                                                    <Text style={styles.heatmapLabel}>{getSeatTypeLabel(type)}</Text>
+                                                    <View style={styles.heatmapBars}>
+                                                        <View style={styles.heatmapBarRow}>
+                                                            <Text style={styles.heatmapBarLabel}>Want</Text>
+                                                            <View style={[styles.heatmapBar, styles.heatmapBarWant, { width: Math.max(4, data.wanted * 20) }]} />
+                                                            <Text style={styles.heatmapBarCount}>{data.wanted}</Text>
+                                                        </View>
+                                                        <View style={styles.heatmapBarRow}>
+                                                            <Text style={styles.heatmapBarLabel}>Have</Text>
+                                                            <View style={[styles.heatmapBar, styles.heatmapBarHave, { width: Math.max(4, data.offered * 20) }]} />
+                                                            <Text style={styles.heatmapBarCount}>{data.offered}</Text>
+                                                        </View>
+                                                    </View>
                                                 </View>
-                                                <LinearGradient
-                                                    colors={[Colors.primary.start, Colors.primary.end]}
-                                                    style={styles.swapArrow}
-                                                >
-                                                    <Ionicons name="swap-horizontal" size={20} color="#fff" />
-                                                </LinearGradient>
-                                                <View style={styles.swapSide}>
-                                                    <Text style={styles.swapLabel}>You Want</Text>
-                                                    <Text style={[styles.swapValue, { color: Colors.success.start }]}>
-                                                        {getSeatTypeLabel(desiredType)}
+                                            ))}
+                                        </View>
+                                        <View style={styles.analyticsStats}>
+                                            <View style={styles.analyticsStat}>
+                                                <Text style={styles.analyticsStatValue}>{analytics.totalOffers}</Text>
+                                                <Text style={styles.analyticsStatLabel}>Total</Text>
+                                            </View>
+                                            <View style={styles.analyticsStat}>
+                                                <Text style={styles.analyticsStatValue}>{analytics.activeOffers}</Text>
+                                                <Text style={styles.analyticsStatLabel}>Active</Text>
+                                            </View>
+                                            <View style={styles.analyticsStat}>
+                                                <Text style={[styles.analyticsStatValue, { color: Colors.success.start }]}>{analytics.completedSwaps}</Text>
+                                                <Text style={styles.analyticsStatLabel}>Done</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                )}
+
+                                {offers.length > 0 ? (
+                                    offers.map((offer, idx) => (
+                                        <View key={offer.id || idx} style={styles.offerCard}>
+                                            <View style={styles.offerTop}>
+                                                <View style={[styles.offerIconBox, { backgroundColor: Colors.primary.light }]}>
+                                                    <MaterialCommunityIcons name="account-switch" size={18} color={Colors.primary.start} />
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                        <Text style={styles.offerSeat}>
+                                                            {offer.currentCoachId}/{offer.currentSeatNo}
+                                                        </Text>
+                                                        <Text style={{ fontSize: 12 }}>{getReasonEmoji(offer.reason)}</Text>
+                                                        <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(offer.priorityScore) + '18' }]}>
+                                                            <Text style={[styles.priorityText, { color: getPriorityColor(offer.priorityScore) }]}>
+                                                                P{(offer.priorityScore * 10).toFixed(0)}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+                                                    <Text style={styles.offerDetail}>
+                                                        Has: {getSeatTypeLabel(offer.currentSeatType)} · Wants: {getSeatTypeLabel(offer.desiredSeatType)}
                                                     </Text>
                                                 </View>
+                                                <View style={{ alignItems: 'flex-end' }}>
+                                                    <Text style={styles.offerTime}>{getTimeSince(offer.createdAt)}</Text>
+                                                    <Text style={styles.expiryText}>{getTimeUntilExpiry(offer.expiresAt)}</Text>
+                                                </View>
                                             </View>
-                                        )}
-
-                                        {/* Submit */}
-                                        <TouchableOpacity
-                                            onPress={handleSubmit}
-                                            disabled={!isFormValid || loading}
-                                            activeOpacity={0.8}
-                                            style={{ marginTop: 16 }}
-                                        >
-                                            <LinearGradient
-                                                colors={
-                                                    isFormValid
-                                                        ? [Colors.primary.start, Colors.primary.end]
-                                                        : [Colors.background.tertiary, Colors.background.tertiary]
-                                                }
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 1, y: 0 }}
-                                                style={[styles.submitBtn, !isFormValid && { opacity: 0.5 }]}
-                                            >
-                                                {loading ? (
-                                                    <ActivityIndicator color="#fff" />
-                                                ) : (
-                                                    <>
-                                                        <MaterialCommunityIcons name="swap-horizontal-bold" size={20} color={isFormValid ? '#fff' : Colors.text.tertiary} />
-                                                        <Text style={[styles.submitBtnText, !isFormValid && { color: Colors.text.tertiary }]}>Register Swap Offer</Text>
-                                                    </>
-                                                )}
-                                            </LinearGradient>
+                                            <View style={styles.offerSwapVisual}>
+                                                <View style={styles.offerSwapChip}>
+                                                    <Text style={styles.offerSwapChipText}>{getSeatTypeLabel(offer.currentSeatType)}</Text>
+                                                </View>
+                                                <Ionicons name="arrow-forward" size={14} color={Colors.text.tertiary} />
+                                                <View style={[styles.offerSwapChip, styles.offerSwapChipDesired]}>
+                                                    <Text style={[styles.offerSwapChipText, { color: Colors.success.start }]}>{getSeatTypeLabel(offer.desiredSeatType)}</Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    ))
+                                ) : (
+                                    <View style={styles.emptyState}>
+                                        <MaterialCommunityIcons name="swap-horizontal" size={40} color={Colors.divider} />
+                                        <Text style={styles.emptyTitle}>No swap offers for this train yet</Text>
+                                        <Text style={styles.emptySub}>Be the first to register one!</Text>
+                                        <TouchableOpacity onPress={() => setActiveTab('register')} style={styles.goRegisterBtn}>
+                                            <Ionicons name="add-circle-outline" size={16} color={Colors.primary.start} />
+                                            <Text style={styles.goRegisterText}>Register Your Swap</Text>
                                         </TouchableOpacity>
                                     </View>
                                 )}
                             </>
                         )}
+                    </View>
+                )}
 
-                        {/* After Registration: Success + Matches */}
-                        {submitted && (
-                            <Animated.View style={{ opacity: fadeAnim }}>
+                {/* ======= TAB: REGISTER ======= */}
+                {activeTab === 'register' && (
+                    <View>
+                        {submitted ? (
+                            <View style={styles.emptyState}>
+                                <Ionicons name="checkmark-circle" size={48} color={Colors.success.start} />
+                                <Text style={styles.emptyTitle}>You already have an active swap</Text>
+                                <Text style={styles.emptySub}>Cancel your current swap to register a new one</Text>
+                                <TouchableOpacity onPress={() => setActiveTab('myswap')} style={styles.goRegisterBtn}>
+                                    <Ionicons name="swap-horizontal-outline" size={16} color={Colors.primary.start} />
+                                    <Text style={styles.goRegisterText}>Go to My Swap</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            <View style={styles.card}>
+                                <Text style={styles.sectionLabel}>YOUR SEAT DETAILS</Text>
+                                <View style={styles.formRow}>
+                                    <View style={[styles.formField, { flex: 1 }]}>
+                                        <Text style={styles.fieldLabel}>Coach</Text>
+                                        <TextInput
+                                            style={styles.fieldInput}
+                                            placeholder="B3"
+                                            placeholderTextColor={Colors.text.tertiary}
+                                            value={coachId}
+                                            onChangeText={setCoachId}
+                                            autoCapitalize="characters"
+                                            maxLength={4}
+                                        />
+                                    </View>
+                                    <View style={[styles.formField, { flex: 1 }]}>
+                                        <Text style={styles.fieldLabel}>Seat #</Text>
+                                        <TextInput
+                                            style={styles.fieldInput}
+                                            placeholder="42"
+                                            placeholderTextColor={Colors.text.tertiary}
+                                            value={seatNo}
+                                            onChangeText={setSeatNo}
+                                            keyboardType="number-pad"
+                                            maxLength={3}
+                                        />
+                                    </View>
+                                </View>
+
+                                <Text style={[styles.sectionLabel, { marginTop: 20 }]}>YOUR CURRENT BERTH</Text>
+                                <View style={styles.typeGrid}>
+                                    {SEAT_TYPES.map(type => (
+                                        <TouchableOpacity
+                                            key={type.id}
+                                            onPress={() => setCurrentType(type.id)}
+                                            style={[styles.typeChip, currentType === type.id && styles.typeChipActive]}
+                                        >
+                                            <Ionicons name={type.icon as any} size={16} color={currentType === type.id ? '#fff' : Colors.text.tertiary} />
+                                            <Text style={[styles.typeChipText, currentType === type.id && styles.typeChipTextActive]}>{type.label}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+
+                                <Text style={[styles.sectionLabel, { marginTop: 20 }]}>DESIRED BERTH</Text>
+                                <View style={styles.typeGrid}>
+                                    {SEAT_TYPES.filter(t => t.id !== currentType).map(type => (
+                                        <TouchableOpacity
+                                            key={type.id}
+                                            onPress={() => setDesiredType(type.id)}
+                                            style={[styles.typeChip, desiredType === type.id && styles.typeChipDesired]}
+                                        >
+                                            <Ionicons name={type.icon as any} size={16} color={desiredType === type.id ? '#fff' : Colors.text.tertiary} />
+                                            <Text style={[styles.typeChipText, desiredType === type.id && styles.typeChipTextActive]}>{type.label}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+
+                                <Text style={[styles.sectionLabel, { marginTop: 20 }]}>REASON (AFFECTS PRIORITY)</Text>
+                                <View style={styles.typeGrid}>
+                                    {REASONS.map(r => (
+                                        <TouchableOpacity
+                                            key={r.id}
+                                            onPress={() => setReason(r.id)}
+                                            style={[styles.typeChip, reason === r.id && styles.reasonChipActive]}
+                                        >
+                                            <Text style={{ fontSize: 14 }}>{r.emoji}</Text>
+                                            <Text style={[styles.typeChipText, reason === r.id && styles.typeChipTextActive]}>{r.label}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+
+                                {/* Visual swap indicator */}
+                                {currentType && desiredType && (
+                                    <View style={styles.swapPreview}>
+                                        <View style={styles.swapSide}>
+                                            <Text style={styles.swapLabel}>You Have</Text>
+                                            <Text style={styles.swapValue}>{getSeatTypeLabel(currentType)}</Text>
+                                        </View>
+                                        <LinearGradient colors={[Colors.primary.start, Colors.primary.end]} style={styles.swapArrow}>
+                                            <Ionicons name="swap-horizontal" size={20} color="#fff" />
+                                        </LinearGradient>
+                                        <View style={styles.swapSide}>
+                                            <Text style={styles.swapLabel}>You Want</Text>
+                                            <Text style={[styles.swapValue, { color: Colors.success.start }]}>
+                                                {getSeatTypeLabel(desiredType)}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                )}
+
+                                {/* Submit */}
+                                <TouchableOpacity
+                                    onPress={handleSubmit}
+                                    disabled={!isFormValid || loading}
+                                    activeOpacity={0.8}
+                                    style={{ marginTop: 16 }}
+                                >
+                                    <LinearGradient
+                                        colors={isFormValid ? [Colors.primary.start, Colors.primary.end] : [Colors.background.tertiary, Colors.background.tertiary]}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 0 }}
+                                        style={[styles.submitBtn, !isFormValid && { opacity: 0.5 }]}
+                                    >
+                                        {loading ? (
+                                            <ActivityIndicator color="#fff" />
+                                        ) : (
+                                            <>
+                                                <MaterialCommunityIcons name="swap-horizontal-bold" size={20} color={isFormValid ? '#fff' : Colors.text.tertiary} />
+                                                <Text style={[styles.submitBtnText, !isFormValid && { color: Colors.text.tertiary }]}>Register Swap Offer</Text>
+                                            </>
+                                        )}
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </View>
+                )}
+
+                {/* ======= TAB: MY SWAP ======= */}
+                {activeTab === 'myswap' && (
+                    <View>
+                        {submitted ? (
+                            <>
+                                {/* Active Swap Card */}
                                 <View style={styles.successCard}>
                                     <View style={styles.successIconBox}>
                                         <Ionicons name="checkmark-circle" size={36} color={Colors.success.start} />
                                     </View>
-                                    <Text style={styles.successTitle}>Swap Registered!</Text>
+                                    <Text style={styles.successTitle}>Swap Active</Text>
                                     <Text style={styles.successDesc}>
                                         {coachId}/{seatNo} ({getSeatTypeLabel(currentType)}) → Looking for {getSeatTypeLabel(desiredType)}
                                     </Text>
                                     <Text style={styles.successMesh}>
                                         {peerCount > 0
                                             ? `📡 Broadcasting to ${peerCount} nearby passenger${peerCount !== 1 ? 's' : ''}`
-                                            : '📱 Saved locally — waiting for nearby passengers'}
+                                            : '📱 Waiting for nearby passengers'}
                                     </Text>
 
                                     <TouchableOpacity
                                         onPress={() => {
                                             if (mySwapId) {
                                                 handleCancelSwap(mySwapId);
-                                            } else {
-                                                const mySwaps = offers.filter(o => o.deviceId === deviceId);
-                                                if (mySwaps.length > 0) handleCancelSwap(mySwaps[0].id);
                                             }
                                         }}
                                         style={styles.cancelBtn}
@@ -771,10 +753,7 @@ export default function SwapScreen() {
                                                             </Text>
                                                         </View>
                                                         <TouchableOpacity
-                                                            style={[
-                                                                styles.acceptBtn,
-                                                                acceptedIds.includes(match.id) && styles.acceptedBtn,
-                                                            ]}
+                                                            style={[styles.acceptBtn, acceptedIds.includes(match.id) && styles.acceptedBtn]}
                                                             onPress={() => handleAcceptSwap(match)}
                                                             disabled={acceptedIds.includes(match.id)}
                                                         >
@@ -793,20 +772,26 @@ export default function SwapScreen() {
                                             <Text style={styles.emptySub}>
                                                 {peerCount > 0
                                                     ? 'Scanning for matches...'
-                                                    : 'Register your offer — matches will appear when other passengers join'}
+                                                    : 'Matches will appear when other passengers join'}
                                             </Text>
                                         </View>
                                     )}
                                 </View>
-
-                                <TouchableOpacity onPress={handleReset} style={styles.newSwapBtn}>
-                                    <Ionicons name="add-circle-outline" size={18} color={Colors.primary.start} />
-                                    <Text style={styles.newSwapText}>Start Over</Text>
+                            </>
+                        ) : (
+                            <View style={styles.emptyState}>
+                                <MaterialCommunityIcons name="swap-horizontal" size={48} color={Colors.divider} />
+                                <Text style={styles.emptyTitle}>No active swap</Text>
+                                <Text style={styles.emptySub}>Register your seat swap to start finding matches</Text>
+                                <TouchableOpacity onPress={() => setActiveTab('register')} style={styles.goRegisterBtn}>
+                                    <Ionicons name="add-circle-outline" size={16} color={Colors.primary.start} />
+                                    <Text style={styles.goRegisterText}>Register Now</Text>
                                 </TouchableOpacity>
-                            </Animated.View>
+                            </View>
                         )}
-                    </>
+                    </View>
                 )}
+
             </ScrollView>
         </View>
     );
@@ -820,7 +805,7 @@ const styles = StyleSheet.create({
     },
     header: {
         flexDirection: 'row', justifyContent: 'space-between',
-        alignItems: 'center', marginBottom: 20,
+        alignItems: 'center', marginBottom: 16,
     },
     backBtn: {
         width: 42, height: 42, borderRadius: 13,
@@ -853,13 +838,27 @@ const styles = StyleSheet.create({
     },
     meshBannerText: { color: Colors.text.secondary, fontSize: 13 },
 
-    infoBanner: { borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
-    infoGradient: {
-        flexDirection: 'row', padding: 18, gap: 14, alignItems: 'center',
+    // Tabs
+    tabBar: {
+        flexDirection: 'row', gap: 4,
+        backgroundColor: Colors.card.background, borderRadius: 14,
+        padding: 4, marginBottom: 16,
+        shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1, shadowRadius: 6, elevation: 3,
     },
-    infoContent: { flex: 1 },
-    infoTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 4 },
-    infoDesc: { color: 'rgba(255,255,255,0.85)', fontSize: 13, lineHeight: 19 },
+    tab: {
+        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+        gap: 6, paddingVertical: 12, borderRadius: 11,
+    },
+    tabActive: {
+        backgroundColor: Colors.primary.light,
+    },
+    tabText: { color: Colors.text.tertiary, fontSize: 12, fontWeight: '600' },
+    tabTextActive: { color: Colors.primary.start, fontWeight: '700' },
+    tabBadge: {
+        position: 'absolute', top: -3, right: -6,
+        width: 8, height: 8, borderRadius: 4,
+    },
 
     // Cards
     card: {
@@ -882,12 +881,12 @@ const styles = StyleSheet.create({
         borderWidth: 1, borderColor: Colors.card.border,
     },
 
-    browseBtn: {},
+    browseBtn: { marginBottom: 16 },
     browseBtnGradient: {
-        flexDirection: 'row', alignItems: 'center', gap: 6,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
         height: 48, borderRadius: 12, paddingHorizontal: 18,
     },
-    browseBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    browseBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
     browseHeader: {
         flexDirection: 'row', justifyContent: 'space-between',
@@ -963,15 +962,14 @@ const styles = StyleSheet.create({
 
     emptyState: { alignItems: 'center', paddingVertical: 30, gap: 8 },
     emptyTitle: { color: Colors.text.secondary, fontSize: 14, fontWeight: '600' },
-    emptySub: { color: Colors.text.tertiary, fontSize: 12 },
+    emptySub: { color: Colors.text.tertiary, fontSize: 12, textAlign: 'center' },
 
-    registerToggle: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-        gap: 8, paddingVertical: 16,
-        borderTopWidth: 1, borderTopColor: Colors.divider,
-        marginTop: 4, marginBottom: 8,
+    goRegisterBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        marginTop: 12, backgroundColor: Colors.primary.light,
+        paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
     },
-    registerToggleText: { color: Colors.primary.start, fontSize: 14, fontWeight: '600' },
+    goRegisterText: { color: Colors.primary.start, fontSize: 13, fontWeight: '600' },
 
     typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     typeChip: {
@@ -1059,12 +1057,6 @@ const styles = StyleSheet.create({
     },
     acceptedBtn: { backgroundColor: Colors.background.tertiary },
     acceptBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-
-    newSwapBtn: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-        gap: 8, paddingVertical: 14,
-    },
-    newSwapText: { color: Colors.primary.start, fontSize: 14, fontWeight: '600' },
 
     notifBanner: {
         position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,

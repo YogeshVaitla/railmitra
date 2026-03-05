@@ -147,6 +147,9 @@ export class NearbyMeshBridge implements IMeshBridge {
                     id: event.endpointId,
                     lastSeen: Date.now(),
                 });
+                // Immediately update UI with new peer count
+                this.peerCount = this.connectedPeers.size;
+                this.peerCallbacks.forEach(cb => cb(this.peerCount));
             })
         );
 
@@ -155,6 +158,9 @@ export class NearbyMeshBridge implements IMeshBridge {
             this.eventEmitter.addListener('onEndpointLost', (event) => {
                 console.log('[NearbyP2P] Peer lost:', event.endpointId);
                 this.connectedPeers.delete(event.endpointId);
+                // Immediately update UI with new peer count
+                this.peerCount = this.connectedPeers.size;
+                this.peerCallbacks.forEach(cb => cb(this.peerCount));
             })
         );
 
