@@ -1,4 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -94,6 +95,26 @@ export default function SwapScreen() {
         getOrCreateDeviceId().then(setDeviceId);
         // Clean up any mock swap data from dev testing
         clearMockSwapData();
+
+        // Restore active swap registration if user navigated away
+        AsyncStorage.getItem('activeSwap').then(data => {
+            if (data) {
+                try {
+                    const saved = JSON.parse(data);
+                    if (saved.mySwapId) {
+                        setMySwapId(saved.mySwapId);
+                        setSubmitted(true);
+                        setTrainNo(saved.trainNo || '');
+                        setCoachId(saved.coachId || '');
+                        setSeatNo(saved.seatNo || '');
+                        setCurrentType(saved.currentType || '');
+                        setDesiredType(saved.desiredType || '');
+                        setHasBrowsed(true);
+                    }
+                } catch { }
+            }
+        });
+
         return () => { meshRef.current?.stop(); };
     }, []);
 
@@ -163,6 +184,11 @@ export default function SwapScreen() {
             setSubmitted(true);
             setShowRegisterForm(false);
 
+            // Persist across navigation so the card stays visible
+            AsyncStorage.setItem('activeSwap', JSON.stringify({
+                mySwapId: swap.id, trainNo, coachId, seatNo, currentType, desiredType,
+            }));
+
             // Refresh offers so our swap appears in the list
             const updatedOffers = await browseOffers(trainNo, journeyDate);
             setOffers(updatedOffers);
@@ -229,6 +255,7 @@ export default function SwapScreen() {
                     onPress: async () => {
                         await cancelSwap(swapId);
                         meshRef.current?.broadcastSwapCancel(swapId);
+                        AsyncStorage.removeItem('activeSwap');
                         showNotification('🚫 Swap offer cancelled.');
                         handleReset();
                     },
