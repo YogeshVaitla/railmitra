@@ -148,10 +148,17 @@ export class NearbyMeshBridge implements IMeshBridge {
                     name: event.endpointName,
                     lastSeen: Date.now(),
                 });
+
                 // Calculate unique peers based on endpointName (deviceId)
-                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map((p: any) => p.name));
-                this.peerCount = uniqueNames.size;
-                this.peerCallbacks.forEach(cb => cb(this.peerCount));
+                // Filter out any undefined names, just in case
+                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map(p => p.name).filter(Boolean));
+
+                // Ensure we don't accidentally count ourselves or get weird duplicate counts
+                const newCount = uniqueNames.size;
+                if (newCount !== this.peerCount) {
+                    this.peerCount = newCount;
+                    this.peerCallbacks.forEach(cb => cb(this.peerCount));
+                }
             })
         );
 
@@ -160,18 +167,25 @@ export class NearbyMeshBridge implements IMeshBridge {
             this.eventEmitter.addListener('onEndpointLost', (event) => {
                 console.log('[NearbyP2P] Peer lost:', event.endpointId);
                 this.connectedPeers.delete(event.endpointId);
-                // Calculate unique peers based on endpointName (deviceId)
-                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map((p: any) => p.name));
-                this.peerCount = uniqueNames.size;
-                this.peerCallbacks.forEach(cb => cb(this.peerCount));
+
+                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map(p => p.name).filter(Boolean));
+                const newCount = uniqueNames.size;
+                if (newCount !== this.peerCount) {
+                    this.peerCount = newCount;
+                    this.peerCallbacks.forEach(cb => cb(this.peerCount));
+                }
             })
         );
 
         // Peer count update
         this.subscriptions.push(
             this.eventEmitter.addListener('onPeerCountChanged', (event) => {
-                this.peerCount = event.count;
-                this.peerCallbacks.forEach(cb => cb(this.peerCount));
+                // If native module explicitly sends a count, we can use it, but our manual calculation is often better
+                // for deduping device IDs. We'll only use this if our map is somehow empty.
+                if (this.peerCount === 0 && event.count > 0) {
+                    this.peerCount = event.count;
+                    this.peerCallbacks.forEach(cb => cb(this.peerCount));
+                }
             })
         );
 
@@ -186,7 +200,7 @@ export class NearbyMeshBridge implements IMeshBridge {
                             .filter((o: any) => o.deviceId !== this.deviceId)
                             .map((o: any) => ({
                                 ...o,
-                                id: `p2p_${o.id}`,
+                                id: `p2p_${o.id}`, // Add prefix to namespace P2P swaps
                                 isLocal: false,
                             }));
 
@@ -196,6 +210,44 @@ export class NearbyMeshBridge implements IMeshBridge {
                                 this.swapCallbacks.forEach(cb => cb(remoteSwaps));
                             }
                         }
+                    } else if (data.type === 'SWAP_ACCEPT') {
+                        // The remote user accepted a swap.
+                        // data.swapId = OUR local swap ID (which they are accepting)
+                        // data.matchedSwapId = THEIR swap ID (which they matched us with)
+                        const { acceptMatch } = require('./swapStore');
+
+                        // We need to make sure we strip the 'p2p_' prefix if they sent it back, 
+                        // but since they received our offer, our ID for them is raw.
+                        // Wait, when we broadcast our offer, the ID is raw. They receive it as p2p_{raw}.
+                        // When they accept, they send `broadcastSwapAccept(p2p_{raw}, their_raw)`.
+                        // So data.swapId = 'p2p_{raw}'. We need to strip it to find our local swap.
+                        const myActualId = data.swapId.replace(/^p2p_/, '').replace(/^cloud_/, '');
+
+                        // And data.matchedSwapId = their raw ID. For us, that's a p2p_ prefix.
+                        // Wait, if they broadcast their_raw, we've saved it as p2p_{their_raw}.
+                        // So we should add the prefix to find it in our store.
+                        const theirStoredId = data.matchedSwapId.startsWith('p2p_') ? data.matchedSwapId : `p2p_${data.matchedSwapId}`;
+
+                        console.log('[NearbyP2P] Received SWAP_ACCEPT:', myActualId, 'WITH', theirStoredId);
+
+                        const success = await acceptMatch(myActualId, theirStoredId);
+                        if (success) {
+                            // Notify UI to refresh (empty array signifies general state update)
+                            this.swapCallbacks.forEach(cb => cb([]));
+                        }
+                    } else if (data.type === 'SWAP_CANCEL') {
+                        // Remote user cancelled their swap offer
+                        const { updateSwapStatus } = require('./swapStore');
+
+                        // Their ID could be sent raw. We store it as `p2p_{raw}`
+                        const theirStoredId = data.swapId.startsWith('p2p_') ? data.swapId : `p2p_${data.swapId}`;
+                        console.log('[NearbyP2P] Received SWAP_CANCEL for:', theirStoredId);
+
+                        // Update status locally to cancel it out so it disappears from Browse/Matches
+                        await updateSwapStatus(theirStoredId, 'CANCELLED');
+
+                        // Notify UI to refresh
+                        this.swapCallbacks.forEach(cb => cb([]));
                     }
                 } catch (error) {
                     console.warn('[NearbyP2P] Failed to parse payload:', error);

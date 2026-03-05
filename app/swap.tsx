@@ -103,42 +103,58 @@ export default function SwapScreen() {
         currentType !== desiredType;
 
     // --- Active Swap Data ---
-    const activeSwapObj = mySwapId ? offers.find(o => o.id === mySwapId) || null : null;
+    const [activeSwapObj, setActiveSwapObj] = useState<LocalSwap | null>(null);
+    const [matchedPartnerObj, setMatchedPartnerObj] = useState<LocalSwap | null>(null);
+
     const isAccepted = activeSwapObj?.status === 'ACCEPTED' || activeSwapObj?.status === 'MATCHED';
-    const matchedPartnerStr = activeSwapObj?.matchedWith || null;
-    let matchedPartnerObj = null;
-    if (isAccepted && matchedPartnerStr) {
-        matchedPartnerObj = offers.find(o => o.id === matchedPartnerStr);
-        // If not in offers (e.g., cleared), we could try fetching all swaps, but for simplicity we'll rely on what's in offers or matches.
-    }
+
+    const loadActiveSwap = async () => {
+        if (!deviceId) return;
+        const { getMySwaps, getSwapsForTrain } = require('../services/swapStore');
+        const mySwaps: LocalSwap[] = await getMySwaps();
+        const active = mySwaps.find(s => s.status !== 'CANCELLED' && s.status !== 'EXPIRED' && s.status !== 'WITHDRAWN' && s.status !== 'COMPLETED');
+
+        setActiveSwapObj(active || null);
+        if (active) {
+            setMySwapId(active.id);
+            setSubmitted(true);
+            setTrainNo(active.trainNo);
+            setCoachId(active.currentCoachId);
+            setSeatNo(active.currentSeatNo.toString());
+            setCurrentType(active.currentSeatType);
+            setDesiredType(active.desiredSeatType);
+            setReason(active.reason);
+
+            if ((active.status === 'ACCEPTED' || active.status === 'MATCHED') && active.matchedWith) {
+                const allSwaps: LocalSwap[] = await getSwapsForTrain(active.trainNo, active.journeyDate);
+                const partner = allSwaps.find(s => s.id === active.matchedWith);
+                setMatchedPartnerObj(partner || null);
+            } else {
+                setMatchedPartnerObj(null);
+            }
+        } else {
+            setMySwapId(null);
+            setSubmitted(false);
+            setMatchedPartnerObj(null);
+        }
+    };
 
     // --- Init ---
-    // ... rest of init remains same, so I'll patch the render part.
     useEffect(() => {
-        getOrCreateDeviceId().then(setDeviceId);
-        clearMockSwapData();
-
-        // Restore active swap registration if user navigated away
-        AsyncStorage.getItem('activeSwap').then(data => {
-            if (data) {
-                try {
-                    const saved = JSON.parse(data);
-                    if (saved.mySwapId) {
-                        setMySwapId(saved.mySwapId);
-                        setSubmitted(true);
-                        setTrainNo(saved.trainNo || '');
-                        setCoachId(saved.coachId || '');
-                        setSeatNo(saved.seatNo || '');
-                        setCurrentType(saved.currentType || '');
-                        setDesiredType(saved.desiredType || '');
-                        setActiveTab('myswap');
-                    }
-                } catch { }
-            }
+        getOrCreateDeviceId().then((id) => {
+            setDeviceId(id);
         });
+        clearMockSwapData();
 
         return () => { meshRef.current?.stop(); };
     }, []);
+
+    // Load active swap when device ID is set
+    useEffect(() => {
+        if (deviceId) {
+            loadActiveSwap();
+        }
+    }, [deviceId, hasNewMatch]);
 
     // --- Handlers ---
 
@@ -154,8 +170,10 @@ export default function SwapScreen() {
             mesh.onSwapReceived((newSwaps) => {
                 browseOffers(trainNo, journeyDate).then(setOffers);
                 handleFindMatches();
-                setHasNewMatch(true);
-                showNotification(`📡 ${newSwaps.length} new offer${newSwaps.length > 1 ? 's' : ''} synced`);
+                if (newSwaps.length > 0) {
+                    setHasNewMatch(true);
+                    showNotification(`📡 ${newSwaps.length} new offer${newSwaps.length > 1 ? 's' : ''} synced`);
+                }
             });
             await mesh.startAdvertising(trainNo, journeyDate);
             await mesh.startDiscovery(trainNo, journeyDate);
@@ -211,6 +229,7 @@ export default function SwapScreen() {
             // Refresh offers + matches
             const updatedOffers = await browseOffers(trainNo, journeyDate);
             setOffers(updatedOffers);
+            await loadActiveSwap();
             handleFindMatches();
         } catch (error: any) {
             setLoading(false);
@@ -247,6 +266,9 @@ export default function SwapScreen() {
                         setAcceptedIds(prev => [...prev, match.id]);
                         showNotification(`✅ Swap accepted! ${seatInfo} (${seatType}) ↔ Your seat.`);
 
+                        // Refresh active swap state to show the success ui immediately
+                        await loadActiveSwap();
+
                         // Refresh browse to remove accepted offers
                         const updatedOffers = await browseOffers(trainNo, journeyDate);
                         setOffers(updatedOffers);
@@ -271,6 +293,7 @@ export default function SwapScreen() {
                         AsyncStorage.removeItem('activeSwap');
                         showNotification('🚫 Swap offer cancelled.');
                         handleReset();
+                        await loadActiveSwap();
                     },
                 },
             ]
