@@ -281,7 +281,7 @@ export class CloudSyncBridge implements IMeshBridge {
         this.journeyDate = journeyDate;
         this.active = true;
         this.deviceId = await getOrCreateDeviceId();
-        this.startPolling();
+        await this.startPolling();
     }
 
     async startDiscovery(trainNo: string, journeyDate: string): Promise<void> {
@@ -289,12 +289,13 @@ export class CloudSyncBridge implements IMeshBridge {
         this.journeyDate = journeyDate;
         this.active = true;
         this.deviceId = await getOrCreateDeviceId();
-        this.startPolling();
+        await this.startPolling();
     }
 
-    private startPolling(): void {
-        // Fetch immediately, then poll
-        this.fetchOffersFromServer();
+    private async startPolling(): Promise<void> {
+        // Fetch immediately and WAIT for the first poll to complete
+        // so that browseOffers() has data ready
+        await this.fetchOffersFromServer();
 
         this.pollTimer = setInterval(() => {
             if (!this.active) return;
