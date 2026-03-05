@@ -102,7 +102,18 @@ export default function SwapScreen() {
         desiredType &&
         currentType !== desiredType;
 
+    // --- Active Swap Data ---
+    const activeSwapObj = mySwapId ? offers.find(o => o.id === mySwapId) || null : null;
+    const isAccepted = activeSwapObj?.status === 'ACCEPTED' || activeSwapObj?.status === 'MATCHED';
+    const matchedPartnerStr = activeSwapObj?.matchedWith || null;
+    let matchedPartnerObj = null;
+    if (isAccepted && matchedPartnerStr) {
+        matchedPartnerObj = offers.find(o => o.id === matchedPartnerStr);
+        // If not in offers (e.g., cleared), we could try fetching all swaps, but for simplicity we'll rely on what's in offers or matches.
+    }
+
     // --- Init ---
+    // ... rest of init remains same, so I'll patch the render part.
     useEffect(() => {
         getOrCreateDeviceId().then(setDeviceId);
         clearMockSwapData();
@@ -687,96 +698,115 @@ export default function SwapScreen() {
                             <>
                                 {/* Active Swap Card */}
                                 <View style={styles.successCard}>
-                                    <View style={styles.successIconBox}>
-                                        <Ionicons name="checkmark-circle" size={36} color={Colors.success.start} />
+                                    <View style={[styles.successIconBox, isAccepted && { backgroundColor: Colors.success.start }]}>
+                                        <Ionicons name={isAccepted ? "checkmark-done-circle" : "checkmark-circle"} size={36} color={isAccepted ? "#fff" : Colors.success.start} />
                                     </View>
-                                    <Text style={styles.successTitle}>Swap Active</Text>
+                                    <Text style={styles.successTitle}>{isAccepted ? 'Swap Accepted!' : 'Swap Active'}</Text>
                                     <Text style={styles.successDesc}>
                                         {coachId}/{seatNo} ({getSeatTypeLabel(currentType)}) → Looking for {getSeatTypeLabel(desiredType)}
                                     </Text>
-                                    <Text style={styles.successMesh}>
-                                        {peerCount > 0
-                                            ? `📡 Broadcasting to ${peerCount} nearby passenger${peerCount !== 1 ? 's' : ''}`
-                                            : '📱 Waiting for nearby passengers'}
-                                    </Text>
 
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            if (mySwapId) {
-                                                handleCancelSwap(mySwapId);
-                                            }
-                                        }}
-                                        style={styles.cancelBtn}
-                                    >
-                                        <Text style={styles.cancelBtnText}>Cancel Offer</Text>
-                                    </TouchableOpacity>
+                                    {isAccepted ? (
+                                        <View style={{ marginTop: 12, padding: 12, backgroundColor: Colors.success.light, borderRadius: 10, width: '100%', alignItems: 'center' }}>
+                                            <Text style={{ color: Colors.success.start, fontWeight: '700', marginBottom: 4 }}>You are swapping with:</Text>
+                                            <Text style={{ color: Colors.text.primary, fontSize: 16, fontWeight: '800' }}>
+                                                {matchedPartnerObj ? `${matchedPartnerObj.currentCoachId}/${matchedPartnerObj.currentSeatNo}` : 'Another Passenger'}
+                                            </Text>
+                                            {matchedPartnerObj && (
+                                                <Text style={{ color: Colors.text.secondary, fontSize: 12 }}>
+                                                    {getSeatTypeLabel(matchedPartnerObj.currentSeatType)}
+                                                </Text>
+                                            )}
+                                        </View>
+                                    ) : (
+                                        <Text style={styles.successMesh}>
+                                            {peerCount > 0
+                                                ? `📡 Broadcasting to ${peerCount} nearby passenger${peerCount !== 1 ? 's' : ''}`
+                                                : '📱 Waiting for nearby passengers'}
+                                        </Text>
+                                    )}
+
+                                    {!isAccepted && (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                if (mySwapId) {
+                                                    handleCancelSwap(mySwapId);
+                                                }
+                                            }}
+                                            style={styles.cancelBtn}
+                                        >
+                                            <Text style={styles.cancelBtnText}>Cancel Offer</Text>
+                                        </TouchableOpacity>
+                                    )}
                                 </View>
 
                                 {/* Matches */}
-                                <View style={styles.matchesSection}>
-                                    <View style={styles.browseHeader}>
-                                        <Text style={styles.browseTitle}>Your Matches</Text>
-                                        <TouchableOpacity onPress={handleFindMatches} style={styles.iconBtn}>
-                                            <Ionicons name="refresh" size={16} color={Colors.primary.start} />
-                                        </TouchableOpacity>
-                                    </View>
-
-                                    {matchLoading ? (
-                                        <ActivityIndicator color={Colors.primary.start} style={{ marginVertical: 20 }} />
-                                    ) : matches.length > 0 ? (
-                                        matches.map((match, idx) => (
-                                            <View key={match.id || idx} style={styles.matchCard}>
-                                                <View style={styles.matchHeader}>
-                                                    <View style={styles.matchTypeBadge}>
-                                                        <Text style={styles.matchTypeText}>{match.type}</Text>
-                                                    </View>
-                                                    <Text style={styles.matchCyclePath}>{match.cyclePath}</Text>
-                                                    <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(match.score / match.participants.length) + '18' }]}>
-                                                        <Text style={[styles.priorityText, { color: getPriorityColor(match.score / match.participants.length) }]}>
-                                                            S{match.score.toFixed(1)}
-                                                        </Text>
-                                                    </View>
-                                                </View>
-
-                                                {match.participants.filter(p => !p.isYou).map((p, pidx) => (
-                                                    <View key={pidx} style={styles.offerTop}>
-                                                        <View style={[styles.offerIconBox, { backgroundColor: Colors.accent.light }]}>
-                                                            <MaterialCommunityIcons name="account-switch" size={18} color={Colors.accent.start} />
-                                                        </View>
-                                                        <View style={{ flex: 1 }}>
-                                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                                <Text style={styles.offerSeat}>{p.coachId}/{p.seatNo}</Text>
-                                                                <Text style={{ fontSize: 12 }}>{getReasonEmoji(p.reason)}</Text>
-                                                            </View>
-                                                            <Text style={styles.offerDetail}>
-                                                                Has: {getSeatTypeLabel(p.has)} · Wants: {getSeatTypeLabel(p.wants)}
-                                                            </Text>
-                                                        </View>
-                                                        <TouchableOpacity
-                                                            style={[styles.acceptBtn, acceptedIds.includes(match.id) && styles.acceptedBtn]}
-                                                            onPress={() => handleAcceptSwap(match)}
-                                                            disabled={acceptedIds.includes(match.id)}
-                                                        >
-                                                            <Text style={styles.acceptBtnText}>
-                                                                {acceptedIds.includes(match.id) ? '✓ Accepted' : 'Accept'}
-                                                            </Text>
-                                                        </TouchableOpacity>
-                                                    </View>
-                                                ))}
-                                            </View>
-                                        ))
-                                    ) : (
-                                        <View style={styles.emptyState}>
-                                            <MaterialCommunityIcons name="magnify-close" size={40} color={Colors.divider} />
-                                            <Text style={styles.emptyTitle}>No matching swaps yet</Text>
-                                            <Text style={styles.emptySub}>
-                                                {peerCount > 0
-                                                    ? 'Scanning for matches...'
-                                                    : 'Matches will appear when other passengers join'}
-                                            </Text>
+                                {!isAccepted && (
+                                    <View style={styles.matchesSection}>
+                                        <View style={styles.browseHeader}>
+                                            <Text style={styles.browseTitle}>Your Matches</Text>
+                                            <TouchableOpacity onPress={handleFindMatches} style={styles.iconBtn}>
+                                                <Ionicons name="refresh" size={16} color={Colors.primary.start} />
+                                            </TouchableOpacity>
                                         </View>
-                                    )}
-                                </View>
+
+                                        {matchLoading ? (
+                                            <ActivityIndicator color={Colors.primary.start} style={{ marginVertical: 20 }} />
+                                        ) : matches.length > 0 ? (
+                                            matches.map((match, idx) => (
+                                                <View key={match.id || idx} style={styles.matchCard}>
+                                                    <View style={styles.matchHeader}>
+                                                        <View style={styles.matchTypeBadge}>
+                                                            <Text style={styles.matchTypeText}>{match.type}</Text>
+                                                        </View>
+                                                        <Text style={styles.matchCyclePath}>{match.cyclePath}</Text>
+                                                        <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(match.score / match.participants.length) + '18' }]}>
+                                                            <Text style={[styles.priorityText, { color: getPriorityColor(match.score / match.participants.length) }]}>
+                                                                S{match.score.toFixed(1)}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+
+                                                    {match.participants.filter(p => !p.isYou).map((p, pidx) => (
+                                                        <View key={pidx} style={styles.offerTop}>
+                                                            <View style={[styles.offerIconBox, { backgroundColor: Colors.accent.light }]}>
+                                                                <MaterialCommunityIcons name="account-switch" size={18} color={Colors.accent.start} />
+                                                            </View>
+                                                            <View style={{ flex: 1 }}>
+                                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                                    <Text style={styles.offerSeat}>{p.coachId}/{p.seatNo}</Text>
+                                                                    <Text style={{ fontSize: 12 }}>{getReasonEmoji(p.reason)}</Text>
+                                                                </View>
+                                                                <Text style={styles.offerDetail}>
+                                                                    Has: {getSeatTypeLabel(p.has)} · Wants: {getSeatTypeLabel(p.wants)}
+                                                                </Text>
+                                                            </View>
+                                                            <TouchableOpacity
+                                                                style={[styles.acceptBtn, acceptedIds.includes(match.id) && styles.acceptedBtn]}
+                                                                onPress={() => handleAcceptSwap(match)}
+                                                                disabled={acceptedIds.includes(match.id)}
+                                                            >
+                                                                <Text style={styles.acceptBtnText}>
+                                                                    {acceptedIds.includes(match.id) ? '✓ Accepted' : 'Accept'}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            ))
+                                        ) : (
+                                            <View style={styles.emptyState}>
+                                                <MaterialCommunityIcons name="magnify-close" size={40} color={Colors.divider} />
+                                                <Text style={styles.emptyTitle}>No matching swaps yet</Text>
+                                                <Text style={styles.emptySub}>
+                                                    {peerCount > 0
+                                                        ? 'Scanning for matches...'
+                                                        : 'Matches will appear when other passengers join'}
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
                             </>
                         ) : (
                             <View style={styles.emptyState}>
