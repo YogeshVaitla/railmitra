@@ -26,6 +26,7 @@ export interface MeshMessage {
 
 export interface MeshPeer {
     id: string;
+    name?: string;
     coachId?: string;
     lastSeen: number;
 }

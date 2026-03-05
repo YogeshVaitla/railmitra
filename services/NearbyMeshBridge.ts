@@ -142,13 +142,15 @@ export class NearbyMeshBridge implements IMeshBridge {
         // Peer found
         this.subscriptions.push(
             this.eventEmitter.addListener('onEndpointFound', (event) => {
-                console.log('[NearbyP2P] Peer found:', event.endpointId);
+                console.log('[NearbyP2P] Peer found:', event.endpointId, 'Name:', event.endpointName);
                 this.connectedPeers.set(event.endpointId, {
                     id: event.endpointId,
+                    name: event.endpointName,
                     lastSeen: Date.now(),
                 });
-                // Immediately update UI with new peer count
-                this.peerCount = this.connectedPeers.size;
+                // Calculate unique peers based on endpointName (deviceId)
+                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map((p: any) => p.name));
+                this.peerCount = uniqueNames.size;
                 this.peerCallbacks.forEach(cb => cb(this.peerCount));
             })
         );
@@ -158,8 +160,9 @@ export class NearbyMeshBridge implements IMeshBridge {
             this.eventEmitter.addListener('onEndpointLost', (event) => {
                 console.log('[NearbyP2P] Peer lost:', event.endpointId);
                 this.connectedPeers.delete(event.endpointId);
-                // Immediately update UI with new peer count
-                this.peerCount = this.connectedPeers.size;
+                // Calculate unique peers based on endpointName (deviceId)
+                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map((p: any) => p.name));
+                this.peerCount = uniqueNames.size;
                 this.peerCallbacks.forEach(cb => cb(this.peerCount));
             })
         );
