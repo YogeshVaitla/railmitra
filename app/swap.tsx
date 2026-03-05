@@ -142,6 +142,7 @@ export default function SwapScreen() {
                 handleFindMatches(); // Auto-refresh matches when background sync receives offers
                 showNotification(`📡 ${newSwaps.length} new offer${newSwaps.length > 1 ? 's' : ''} from nearby passengers`);
             });
+            await mesh.startAdvertising(trainNo, journeyDate);
             await mesh.startDiscovery(trainNo, journeyDate);
         }
     };
