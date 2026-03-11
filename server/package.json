@@ -10,7 +10,9 @@
         "prisma:generate": "prisma generate",
         "prisma:migrate": "prisma migrate deploy",
         "prisma:seed": "ts-node prisma/seed.ts",
-        "prisma:studio": "prisma studio"
+        "prisma:studio": "prisma studio",
+        "test": "jest --verbose",
+        "test:coverage": "jest --coverage --verbose"
     },
     "dependencies": {
         "@prisma/client": "^6.4.0",
@@ -19,10 +21,14 @@
         "@types/node": "^22.0.0",
         "cors": "^2.8.5",
         "express": "^4.21.0",
+        "express-rate-limit": "^8.3.1",
         "prisma": "^6.4.0",
         "typescript": "^5.7.0"
     },
     "devDependencies": {
+        "@types/jest": "^30.0.0",
+        "jest": "^30.3.0",
+        "ts-jest": "^29.4.6",
         "ts-node": "^10.9.2"
     }
 }

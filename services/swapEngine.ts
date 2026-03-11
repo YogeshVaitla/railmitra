@@ -53,19 +53,25 @@ interface GraphNode {
  * Node = swap request
  * Edge A→B exists when A wants what B has (A.desiredSeatType === B.currentSeatType)
  * 
- * A valid swap cycle means everyone in the cycle gets what they want.
+ * RM-SW-031: Optimized with Map-based lookups instead of O(n²) nested loops.
  */
 function buildSwapGraph(swaps: LocalSwap[]): GraphNode[] {
     const nodes: GraphNode[] = swaps.map(swap => ({ swap, edges: [] }));
 
-    // O(n²) but n is tiny (maybe 20-30 swaps per train at most)
+    // Build a reverse index: seatType → list of node indices that HAVE that type
+    const hasSeatType = new Map<string, number[]>();
     for (let i = 0; i < nodes.length; i++) {
-        for (let j = 0; j < nodes.length; j++) {
-            if (i === j) continue;
-            // I want what they have? Draw an edge.
-            if (nodes[i].swap.desiredSeatType === nodes[j].swap.currentSeatType) {
-                nodes[i].edges.push(j);
-            }
+        const type = nodes[i].swap.currentSeatType;
+        if (!hasSeatType.has(type)) hasSeatType.set(type, []);
+        hasSeatType.get(type)!.push(i);
+    }
+
+    // For each node, look up who has what they want via the Map (O(1) per lookup)
+    for (let i = 0; i < nodes.length; i++) {
+        const wanted = nodes[i].swap.desiredSeatType;
+        const candidates = hasSeatType.get(wanted) || [];
+        for (const j of candidates) {
+            if (i !== j) nodes[i].edges.push(j);
         }
     }
 
@@ -75,18 +81,28 @@ function buildSwapGraph(swaps: LocalSwap[]): GraphNode[] {
 /**
  * Find all simple cycles in the graph up to maxLength.
  * 
- * Uses a bounded DFS. Since we're dealing with small graphs (20-30 nodes max),
- * this is fast enough. We cap at 5-way cycles because anything longer is
+ * Uses a bounded DFS. We cap at 5-way cycles because anything longer is
  * impractical for real-world seat swaps.
+ * 
+ * RM-SW-031: Added 250ms timeout — if the search takes too long on a
+ * dense graph, return whatever valid cycles we've found so far.
  * 
  * Returns arrays of node indices representing each cycle.
  */
 function findAllCycles(nodes: GraphNode[], maxLength: number = 5): number[][] {
     const cycles: number[][] = [];
     const n = nodes.length;
+    const startTime = performance.now();
+    const TIMEOUT_MS = 250;
 
     // For each starting node, do a bounded DFS looking for cycles back to start
     for (let start = 0; start < n; start++) {
+        // RM-SW-031: Short-circuit if we've exceeded the time budget
+        if (performance.now() - startTime > TIMEOUT_MS) {
+            console.log(`[SwapEngine] Cycle search timed out after ${Math.round(performance.now() - startTime)}ms with ${cycles.length} cycles found`);
+            break;
+        }
+
         const stack: { nodeIdx: number; path: number[] }[] = [{ nodeIdx: start, path: [start] }];
 
         while (stack.length > 0) {
@@ -120,11 +136,13 @@ function findAllCycles(nodes: GraphNode[], maxLength: number = 5): number[][] {
  * - Length penalty: shorter cycles are easier to coordinate (2-way > 3-way > N-way)
  * - Freshness bonus: recently created swaps get a slight boost
  * - "You" bonus: cycles containing the current user's swap get a boost
+ * - RM-SW-030: Coach proximity bonus — same coach +0.20, adjacent +0.10
  */
 function scoreCycle(cycle: number[], nodes: GraphNode[], myDeviceId: string): number {
     let cumulativePriority = 0;
     let freshnessBonus = 0;
     let youBonus = 0;
+    let coachProximityBonus = 0;
     const now = Date.now();
 
     for (const idx of cycle) {
@@ -141,12 +159,44 @@ function scoreCycle(cycle: number[], nodes: GraphNode[], myDeviceId: string): nu
         }
     }
 
+    // RM-SW-030: Coach proximity bonus — check each trade edge in the cycle
+    for (let i = 0; i < cycle.length; i++) {
+        const nextIdx = (i + 1) % cycle.length;
+        const coachA = nodes[cycle[i]].swap.currentCoachId;
+        const coachB = nodes[cycle[nextIdx]].swap.currentCoachId;
+
+        if (coachA === coachB) {
+            // Same coach = easy walk, big bonus
+            coachProximityBonus += 0.20;
+        } else if (areAdjacentCoaches(coachA, coachB)) {
+            // Next-door coaches, still pretty convenient
+            coachProximityBonus += 0.10;
+        }
+    }
+
     // Length penalty: 2-way = 1.0x, 3-way = 0.85x, 4-way = 0.7x, 5-way = 0.55x
     const lengthMultiplier = Math.max(0.4, 1.15 - cycle.length * 0.15);
 
     return parseFloat(
-        ((cumulativePriority + freshnessBonus + youBonus) * lengthMultiplier).toFixed(3)
+        ((cumulativePriority + freshnessBonus + youBonus + coachProximityBonus) * lengthMultiplier).toFixed(3)
     );
+}
+
+/**
+ * RM-SW-030: Check if two coach IDs are adjacent (e.g., S4 and S5, B1 and B2).
+ * Parses the numeric suffix from coach IDs and checks if they differ by exactly 1.
+ */
+function areAdjacentCoaches(coachA: string, coachB: string): boolean {
+    const numA = parseInt(coachA.replace(/[^0-9]/g, ''), 10);
+    const numB = parseInt(coachB.replace(/[^0-9]/g, ''), 10);
+    if (isNaN(numA) || isNaN(numB)) return false;
+
+    // Must share the same letter prefix (e.g., both 'S' or both 'B')
+    const prefixA = coachA.replace(/[0-9]/g, '');
+    const prefixB = coachB.replace(/[0-9]/g, '');
+    if (prefixA !== prefixB) return false;
+
+    return Math.abs(numA - numB) === 1;
 }
 
 /**
@@ -189,8 +239,12 @@ function selectBestMatches(
  * 
  * This is the core IP — a graph-based cycle finder with priority scoring,
  * running entirely on-device. No server call, no internet, no latency.
+ * 
+ * RM-SW-031: Added execution time logging for observability.
  */
 export function findBestMatches(swaps: LocalSwap[], myDeviceId: string): SwapMatch[] {
+    const t0 = performance.now();
+
     // Only consider open swaps
     const openSwaps = swaps.filter(s => s.status === 'OPEN');
     if (openSwaps.length < 2) return [];
@@ -205,10 +259,17 @@ export function findBestMatches(swaps: LocalSwap[], myDeviceId: string): SwapMat
 
     // Find all possible cycles
     const cycles = findAllCycles(nodes, 5);
-    if (cycles.length === 0) return [];
+    if (cycles.length === 0) {
+        const elapsed = Math.round(performance.now() - t0);
+        if (elapsed > 50) console.log(`[SwapEngine] findBestMatches: ${openSwaps.length} swaps, 0 cycles, ${elapsed}ms`);
+        return [];
+    }
 
     // Select the best non-overlapping matches
     const bestMatches = selectBestMatches(cycles, nodes, myDeviceId);
+
+    const elapsed = Math.round(performance.now() - t0);
+    console.log(`[SwapEngine] findBestMatches: ${openSwaps.length} swaps, ${cycles.length} cycles, ${bestMatches.length} matches, ${elapsed}ms`);
 
     // Convert to SwapMatch format
     return bestMatches.map(({ cycle, score }) => {

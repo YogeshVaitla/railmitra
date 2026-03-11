@@ -6,9 +6,13 @@
  * 
  * Service ID format: "railmitra_{trainNo}_{journeyDate}"
  * This ensures only passengers on the same train discover each other.
+ * 
+ * RM-SW-020: Exponential backoff retry + AppState-aware reconnection
+ * RM-SW-021: Robust SWAP_ACCEPT broadcast and receive handling
+ * RM-SW-022: Gossip relay with TTL and LRU dedup for train-wide coverage
  */
 
-import { NativeEventEmitter, NativeModules, PermissionsAndroid, Platform } from 'react-native';
+import { AppState, AppStateStatus, NativeEventEmitter, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import {
     IMeshBridge,
     MeshPeer,
@@ -26,6 +30,12 @@ const NearbyConnections = Platform.OS === 'android'
     ? NativeModules.NearbyConnections
     : null;
 
+// RM-SW-020: Retry delays for exponential backoff (in ms)
+const RETRY_DELAYS = [5000, 10000, 30000];
+
+// RM-SW-022: Max number of seen message hashes to keep (LRU-style)
+const GOSSIP_CACHE_SIZE = 100;
+
 export class NearbyMeshBridge implements IMeshBridge {
     private active = false;
     private trainNo = '';
@@ -37,6 +47,19 @@ export class NearbyMeshBridge implements IMeshBridge {
     private connectedPeers: Map<string, MeshPeer> = new Map();
     private eventEmitter: NativeEventEmitter | null = null;
     private subscriptions: any[] = [];
+
+    // RM-SW-020: Retry state
+    private advertiseRetryCount = 0;
+    private discoveryRetryCount = 0;
+    private advertiseRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    private discoveryRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // RM-SW-020: AppState tracking
+    private appStateSubscription: any = null;
+    private lastBackgroundedAt: number | null = null;
+
+    // RM-SW-022: Gossip relay LRU cache — stores hashes of seen messages
+    private seenMessageHashes: string[] = [];
 
     /**
      * Check if the native module is actually available
@@ -80,6 +103,43 @@ export class NearbyMeshBridge implements IMeshBridge {
         }
     }
 
+    // RM-SW-020: AppState listener — tear down and re-init if backgrounded > 5 minutes
+    private setupAppStateListener(): void {
+        if (this.appStateSubscription) return;
+
+        this.appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+            if (nextState === 'background' || nextState === 'inactive') {
+                this.lastBackgroundedAt = Date.now();
+                console.log('[NearbyP2P] App backgrounded, tracking time.');
+            } else if (nextState === 'active' && this.lastBackgroundedAt) {
+                const backgroundDuration = Date.now() - this.lastBackgroundedAt;
+                const fiveMinutes = 5 * 60 * 1000;
+
+                if (backgroundDuration > fiveMinutes && this.active) {
+                    console.log(`[NearbyP2P] App was backgrounded for ${Math.round(backgroundDuration / 1000)}s — re-initializing P2P bridge.`);
+                    this.teardownAndReconnect();
+                }
+                this.lastBackgroundedAt = null;
+            }
+        });
+    }
+
+    // RM-SW-020: Full teardown and re-initialization
+    private async teardownAndReconnect(): Promise<void> {
+        const savedTrainNo = this.trainNo;
+        const savedJourneyDate = this.journeyDate;
+
+        // Tear down current connections
+        this.stopInternal(false); // Don't remove AppState listener
+
+        // Small breath before reconnecting
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Re-initialize both advertising and discovery
+        await this.startAdvertising(savedTrainNo, savedJourneyDate);
+        await this.startDiscovery(savedTrainNo, savedJourneyDate);
+    }
+
     async startAdvertising(trainNo: string, journeyDate: string): Promise<void> {
         if (!NearbyMeshBridge.isAvailable()) {
             console.log('[NearbyP2P] Native module not available, skipping');
@@ -95,6 +155,7 @@ export class NearbyMeshBridge implements IMeshBridge {
         this.active = true;
 
         this.setupEventListeners();
+        this.setupAppStateListener();
 
         const serviceId = `railmitra_${trainNo}_${journeyDate}`;
         const deviceName = this.deviceId.substring(0, 8); // Short device identifier
@@ -102,9 +163,36 @@ export class NearbyMeshBridge implements IMeshBridge {
         try {
             await NearbyConnections.startAdvertising(deviceName, serviceId);
             console.log('[NearbyP2P] Advertising started for', serviceId);
+            this.advertiseRetryCount = 0; // Reset on success
         } catch (error: any) {
             console.warn('[NearbyP2P] Advertising failed:', error.message);
+            this.retryAdvertising(trainNo, journeyDate);
         }
+    }
+
+    // RM-SW-020: Exponential backoff retry for advertising
+    private retryAdvertising(trainNo: string, journeyDate: string): void {
+        if (this.advertiseRetryCount >= RETRY_DELAYS.length) {
+            console.warn('[NearbyP2P] Advertising retry limit reached. Giving up.');
+            return;
+        }
+
+        const delay = RETRY_DELAYS[this.advertiseRetryCount];
+        console.log(`[NearbyP2P] Retrying advertising in ${delay / 1000}s (attempt ${this.advertiseRetryCount + 1}/${RETRY_DELAYS.length})`);
+
+        this.advertiseRetryTimer = setTimeout(async () => {
+            this.advertiseRetryCount++;
+            try {
+                const serviceId = `railmitra_${trainNo}_${journeyDate}`;
+                const deviceName = this.deviceId.substring(0, 8);
+                await NearbyConnections.startAdvertising(deviceName, serviceId);
+                console.log('[NearbyP2P] Advertising started (retry succeeded)');
+                this.advertiseRetryCount = 0;
+            } catch (err: any) {
+                console.warn('[NearbyP2P] Advertising retry failed:', err.message);
+                this.retryAdvertising(trainNo, journeyDate);
+            }
+        }, delay);
     }
 
     async startDiscovery(trainNo: string, journeyDate: string): Promise<void> {
@@ -122,15 +210,42 @@ export class NearbyMeshBridge implements IMeshBridge {
         this.active = true;
 
         this.setupEventListeners();
+        this.setupAppStateListener();
 
         const serviceId = `railmitra_${trainNo}_${journeyDate}`;
 
         try {
             await NearbyConnections.startDiscovery(serviceId);
             console.log('[NearbyP2P] Discovery started for', serviceId);
+            this.discoveryRetryCount = 0; // Reset on success
         } catch (error: any) {
             console.warn('[NearbyP2P] Discovery failed:', error.message);
+            this.retryDiscovery(trainNo, journeyDate);
         }
+    }
+
+    // RM-SW-020: Exponential backoff retry for discovery
+    private retryDiscovery(trainNo: string, journeyDate: string): void {
+        if (this.discoveryRetryCount >= RETRY_DELAYS.length) {
+            console.warn('[NearbyP2P] Discovery retry limit reached. Giving up.');
+            return;
+        }
+
+        const delay = RETRY_DELAYS[this.discoveryRetryCount];
+        console.log(`[NearbyP2P] Retrying discovery in ${delay / 1000}s (attempt ${this.discoveryRetryCount + 1}/${RETRY_DELAYS.length})`);
+
+        this.discoveryRetryTimer = setTimeout(async () => {
+            this.discoveryRetryCount++;
+            try {
+                const serviceId = `railmitra_${trainNo}_${journeyDate}`;
+                await NearbyConnections.startDiscovery(serviceId);
+                console.log('[NearbyP2P] Discovery started (retry succeeded)');
+                this.discoveryRetryCount = 0;
+            } catch (err: any) {
+                console.warn('[NearbyP2P] Discovery retry failed:', err.message);
+                this.retryDiscovery(trainNo, journeyDate);
+            }
+        }, delay);
     }
 
     private setupEventListeners(): void {
@@ -139,26 +254,27 @@ export class NearbyMeshBridge implements IMeshBridge {
 
         this.eventEmitter = new NativeEventEmitter(NearbyConnections);
 
-        // Peer found
+        // Peer found — RM-SW-020: deduplicate by endpointName (deviceId)
         this.subscriptions.push(
             this.eventEmitter.addListener('onEndpointFound', (event) => {
                 console.log('[NearbyP2P] Peer found:', event.endpointId, 'Name:', event.endpointName);
+
+                // RM-SW-020: Check for duplicate peers by endpointName before adding
+                const existingByName = Array.from(this.connectedPeers.values()).find(
+                    p => p.name === event.endpointName && p.id !== event.endpointId
+                );
+                if (existingByName) {
+                    console.log('[NearbyP2P] Duplicate peer detected (same name, different endpoint). Removing stale entry:', existingByName.id);
+                    this.connectedPeers.delete(existingByName.id);
+                }
+
                 this.connectedPeers.set(event.endpointId, {
                     id: event.endpointId,
                     name: event.endpointName,
                     lastSeen: Date.now(),
                 });
 
-                // Calculate unique peers based on endpointName (deviceId)
-                // Filter out any undefined names, just in case
-                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map(p => p.name).filter(Boolean));
-
-                // Ensure we don't accidentally count ourselves or get weird duplicate counts
-                const newCount = uniqueNames.size;
-                if (newCount !== this.peerCount) {
-                    this.peerCount = newCount;
-                    this.peerCallbacks.forEach(cb => cb(this.peerCount));
-                }
+                this.recalculatePeerCount();
             })
         );
 
@@ -167,13 +283,7 @@ export class NearbyMeshBridge implements IMeshBridge {
             this.eventEmitter.addListener('onEndpointLost', (event) => {
                 console.log('[NearbyP2P] Peer lost:', event.endpointId);
                 this.connectedPeers.delete(event.endpointId);
-
-                const uniqueNames = new Set(Array.from(this.connectedPeers.values()).map(p => p.name).filter(Boolean));
-                const newCount = uniqueNames.size;
-                if (newCount !== this.peerCount) {
-                    this.peerCount = newCount;
-                    this.peerCallbacks.forEach(cb => cb(this.peerCount));
-                }
+                this.recalculatePeerCount();
             })
         );
 
@@ -189,11 +299,40 @@ export class NearbyMeshBridge implements IMeshBridge {
             })
         );
 
-        // Incoming swap data
+        // Incoming swap data — RM-SW-021 + RM-SW-022: handles gossip relay
         this.subscriptions.push(
             this.eventEmitter.addListener('onPayloadReceived', async (event) => {
                 try {
-                    const data = JSON.parse(event.data);
+                    const rawData = JSON.parse(event.data);
+
+                    // RM-SW-022: Unwrap gossip envelope if present
+                    let data = rawData;
+                    let isGossip = false;
+                    let originEndpointId = event.endpointId;
+
+                    if (rawData.ttl !== undefined && rawData.senderId && rawData.payload) {
+                        // This is a gossip-wrapped payload
+                        isGossip = true;
+                        const msgHash = `${rawData.senderId}_${rawData.timestamp}`;
+
+                        // Check if we've already seen this message
+                        if (this.seenMessageHashes.includes(msgHash)) {
+                            return; // Already processed, skip
+                        }
+
+                        // Add to LRU cache
+                        this.seenMessageHashes.push(msgHash);
+                        if (this.seenMessageHashes.length > GOSSIP_CACHE_SIZE) {
+                            this.seenMessageHashes.shift(); // Evict oldest
+                        }
+
+                        // RM-SW-022: Relay if TTL > 0
+                        if (rawData.ttl > 0) {
+                            this.relayGossip(rawData, originEndpointId);
+                        }
+
+                        data = rawData.payload;
+                    }
 
                     if (data.type === 'SWAP_OFFERS' && Array.isArray(data.offers)) {
                         const remoteSwaps: LocalSwap[] = data.offers
@@ -211,21 +350,15 @@ export class NearbyMeshBridge implements IMeshBridge {
                             }
                         }
                     } else if (data.type === 'SWAP_ACCEPT') {
-                        // The remote user accepted a swap.
-                        // data.swapId = OUR local swap ID (which they are accepting)
-                        // data.matchedSwapId = THEIR swap ID (which they matched us with)
+                        // RM-SW-021: The remote user accepted a swap.
+                        // data.swapId = OUR local swap ID (with p2p_ prefix from their perspective)
+                        // data.matchedSwapId = THEIR swap ID (raw from their device)
                         const { acceptMatch } = require('./swapStore');
 
-                        // We need to make sure we strip the 'p2p_' prefix if they sent it back, 
-                        // but since they received our offer, our ID for them is raw.
-                        // Wait, when we broadcast our offer, the ID is raw. They receive it as p2p_{raw}.
-                        // When they accept, they send `broadcastSwapAccept(p2p_{raw}, their_raw)`.
-                        // So data.swapId = 'p2p_{raw}'. We need to strip it to find our local swap.
+                        // Strip p2p_/cloud_ prefixes to find our local swap
                         const myActualId = data.swapId.replace(/^p2p_/, '').replace(/^cloud_/, '');
 
-                        // And data.matchedSwapId = their raw ID. For us, that's a p2p_ prefix.
-                        // Wait, if they broadcast their_raw, we've saved it as p2p_{their_raw}.
-                        // So we should add the prefix to find it in our store.
+                        // Their ID needs p2p_ prefix to find it in our store
                         const theirStoredId = data.matchedSwapId.startsWith('p2p_') ? data.matchedSwapId : `p2p_${data.matchedSwapId}`;
 
                         console.log('[NearbyP2P] Received SWAP_ACCEPT:', myActualId, 'WITH', theirStoredId);
@@ -267,6 +400,49 @@ export class NearbyMeshBridge implements IMeshBridge {
         );
     }
 
+    // RM-SW-020: Centralized peer count recalculation with dedup by name
+    private recalculatePeerCount(): void {
+        const uniqueNames = new Set(
+            Array.from(this.connectedPeers.values()).map(p => p.name).filter(Boolean)
+        );
+        const newCount = uniqueNames.size;
+        if (newCount !== this.peerCount) {
+            this.peerCount = newCount;
+            this.peerCallbacks.forEach(cb => cb(this.peerCount));
+        }
+    }
+
+    // RM-SW-022: Gossip relay — re-broadcast unseen payloads with decremented TTL
+    private relayGossip(envelope: any, originEndpointId: string): void {
+        if (!NearbyConnections || !this.active) return;
+
+        const relayEnvelope = {
+            ...envelope,
+            ttl: envelope.ttl - 1,
+        };
+
+        const payload = JSON.stringify(relayEnvelope);
+
+        // Send to all connected peers EXCEPT the one that sent it to us
+        for (const [endpointId] of this.connectedPeers) {
+            if (endpointId !== originEndpointId) {
+                NearbyConnections.sendPayloadToEndpoint(endpointId, payload).catch(() => { });
+            }
+        }
+    }
+
+    /**
+     * RM-SW-022: Wrap a payload in a gossip envelope with TTL, senderId, and timestamp.
+     */
+    private wrapInGossipEnvelope(payload: any): string {
+        return JSON.stringify({
+            ttl: 3,
+            senderId: this.deviceId,
+            timestamp: Date.now(),
+            payload,
+        });
+    }
+
     /**
      * Send all our current swap offers to newly connected peers
      */
@@ -285,10 +461,12 @@ export class NearbyMeshBridge implements IMeshBridge {
             );
 
             if (myOffers.length > 0) {
-                const payload = JSON.stringify({
+                const innerPayload = {
                     type: 'SWAP_OFFERS',
                     offers: myOffers,
-                });
+                };
+                // RM-SW-022: Wrap in gossip envelope for relay
+                const payload = this.wrapInGossipEnvelope(innerPayload);
                 await NearbyConnections.sendPayload(payload);
             }
         } catch (error) {
@@ -299,35 +477,47 @@ export class NearbyMeshBridge implements IMeshBridge {
     broadcastSwapOffer(swap: LocalSwap): void {
         if (!NearbyConnections || !this.active) return;
 
-        const payload = JSON.stringify({
+        const innerPayload = {
             type: 'SWAP_OFFERS',
             offers: [swap],
-        });
+        };
+        // RM-SW-022: Wrap in gossip envelope
+        const payload = this.wrapInGossipEnvelope(innerPayload);
 
         NearbyConnections.sendPayload(payload).catch((err: any) => {
             console.log('[NearbyP2P] Send failed (no peers connected yet):', err.message);
         });
     }
 
-    broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
+    // RM-SW-021: Broadcast swap acceptance with proper format
+    broadcastSwapAcceptance(swapId: string, matchedSwapId: string): void {
         if (!NearbyConnections || !this.active) return;
 
-        const payload = JSON.stringify({
+        const innerPayload = {
             type: 'SWAP_ACCEPT',
             swapId,
             matchedSwapId,
-        });
+        };
+        // RM-SW-022: Wrap in gossip envelope
+        const payload = this.wrapInGossipEnvelope(innerPayload);
 
         NearbyConnections.sendPayload(payload).catch(() => { });
+    }
+
+    // Keep the old method name for backward compat
+    broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
+        this.broadcastSwapAcceptance(swapId, matchedSwapId);
     }
 
     broadcastSwapCancel(swapId: string): void {
         if (!NearbyConnections || !this.active) return;
 
-        const payload = JSON.stringify({
+        const innerPayload = {
             type: 'SWAP_CANCEL',
             swapId,
-        });
+        };
+        // RM-SW-022: Wrap in gossip envelope
+        const payload = this.wrapInGossipEnvelope(innerPayload);
 
         NearbyConnections.sendPayload(payload).catch(() => { });
     }
@@ -348,10 +538,19 @@ export class NearbyMeshBridge implements IMeshBridge {
 
     isActive(): boolean { return this.active; }
 
-    stop(): void {
+    // Internal stop — optionally keeps the AppState listener alive during reconnect
+    private stopInternal(removeAppStateListener: boolean): void {
         this.active = false;
         this.peerCount = 0;
         this.connectedPeers.clear();
+
+        // Clear retry timers
+        if (this.advertiseRetryTimer) clearTimeout(this.advertiseRetryTimer);
+        if (this.discoveryRetryTimer) clearTimeout(this.discoveryRetryTimer);
+        this.advertiseRetryTimer = null;
+        this.discoveryRetryTimer = null;
+        this.advertiseRetryCount = 0;
+        this.discoveryRetryCount = 0;
 
         // Clean up event listeners
         this.subscriptions.forEach(sub => sub.remove());
@@ -360,8 +559,17 @@ export class NearbyMeshBridge implements IMeshBridge {
         this.swapCallbacks = [];
         this.peerCallbacks = [];
 
+        if (removeAppStateListener && this.appStateSubscription) {
+            this.appStateSubscription.remove();
+            this.appStateSubscription = null;
+        }
+
         if (NearbyConnections) {
             NearbyConnections.stopAll().catch(() => { });
         }
+    }
+
+    stop(): void {
+        this.stopInternal(true);
     }
 }

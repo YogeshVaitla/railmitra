@@ -1,19 +1,35 @@
 /**
- * This is the main server for Seat Seeker.
- * We've got endpoints here for reporting seats, checking confidence scores,
- * parsing PNR SMS, and all that good stuff.
+ * Seat Swap Sync Server — V1.0.0
+ * 
+ * Swap-only mode: only seat swap endpoints are active.
+ * Other features (PNR, toilets, availability, utilities) are disabled
+ * behind a 501 stub and will return in V2.
  */
 
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import {
-    calculateSeatConfidence,
     findSwapMatches,
-    inferCoachType
 } from './core-logic';
-import { hashPNR, inferVacancy, parseIRCTCSMS } from './pnr-parser';
-import { detectTheftRisk, detectToiletQueue } from './smart-utilities';
+
+// V2 imports — kept for reference, disabled in V1
+// import { calculateSeatConfidence, inferCoachType } from './core-logic';
+// import { hashPNR, inferVacancy, parseIRCTCSMS } from './pnr-parser';
+// import { detectTheftRisk, detectToiletQueue } from './smart-utilities';
+import {
+    logger,
+    metrics,
+    requestTelemetry,
+    trackSSEConnect,
+    trackSSEDisconnect,
+    getSSEStats,
+    recordMeshMetrics,
+    recordSwapEngineRun,
+    prismaQueryLogger,
+    getHealthStatus,
+} from './telemetry';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -22,14 +38,46 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Just a quick check to see if the server is actually breathing
-app.get('/api/health', (_req, res) => {
+// RM-SW-013: Rate limiting — max 20 requests per minute per IP on swap APIs
+const swapLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: { error: 'Too many requests, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+app.use('/api/swaps', swapLimiter);
+
+// --- Telemetry middleware: logs every request + tracks latency ---
+app.use(requestTelemetry);
+
+// Deep health check — pings DB, checks memory, SSE load
+app.get('/api/health', async (_req, res) => {
+    const health = await getHealthStatus(prisma);
+    const statusCode = health.status === 'unhealthy' ? 503 : 200;
+    res.status(statusCode).json(health);
+});
+
+// --- Internal: Metrics Endpoint ---
+app.get('/api/metrics', (_req, res) => {
+    const snap = metrics.snapshot();
+    const sseStats = getSSEStats();
     res.json({
-        status: 'ok',
-        service: 'Seat Seeker API',
-        version: '1.0.0',
-        timestamp: new Date().toISOString(),
+        ...snap,
+        sse: sseStats,
+        uptime_seconds: Math.floor(process.uptime()),
+        memory: process.memoryUsage(),
     });
+});
+
+// --- Telemetry: Receive P2P Mesh metrics from mobile clients ---
+app.post('/api/telemetry/mesh', (req, res) => {
+    try {
+        recordMeshMetrics(req.body);
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(400).json({ error: error.message });
+    }
 });
 
 // Friendly root endpoint so standard browser visits don't throw 404
@@ -37,94 +85,25 @@ app.get('/', (_req, res) => {
     res.send(`
         <html>
             <body style="font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f9f9f9;">
-                <h1 style="color: #ff6b35;">🚄 Seat Swap Sync Server is Live!</h1>
-                <p>Version 1.0.0</p>
+                <h1 style="color: #ff6b35;">🚄 Seat Swap Sync Server v1.0.0</h1>
+                <p>Swap-only mode active. Other features coming in V2.</p>
             </body>
         </html>
     `);
 });
 
-// --- SEAT REPORTS ---
+// ============================================================
+// RM-SW-010: V2 ENDPOINTS — Disabled for V1, return 501
+// ============================================================
 
-// When a user sees a seat is empty (or not), this is where it goes.
-app.post('/api/reports', async (req, res) => {
-    try {
-        const { seatId, status, deviceId, gpsLat, gpsLong, verificationMethod } = req.body;
+const v2Stub = (_req: any, res: any) => {
+    res.status(501).json({ error: 'This feature is coming in V2' });
+};
 
-        const report = await prisma.seatReport.create({
-            data: {
-                seatId,
-                status,
-                deviceId: hashPNR(deviceId), // Privacy first—don't store raw device IDs
-                gpsLat,
-                gpsLong,
-                verificationMethod: verificationMethod || 'MANUAL',
-            },
-        });
-
-        // Track how active the user is. We use this for their trust score later.
-        await prisma.userReputation.upsert({
-            where: { deviceId: hashPNR(deviceId) },
-            update: { totalReports: { increment: 1 }, lastReportAt: new Date() },
-            create: { deviceId: hashPNR(deviceId), trustScore: 0.5, totalReports: 1 },
-        });
-
-        res.status(201).json({ success: true, reportId: report.id });
-    } catch (error: any) {
-        res.status(400).json({ error: error.message });
-    }
-});
-
-// --- SEAT CONFIDENCE ---
-
-// How sure are we about this specific seat?
-app.get('/api/seats/:seatId/confidence', async (req, res) => {
-    try {
-        const seatId = parseInt(req.params.seatId);
-        const result = await calculateSeatConfidence(seatId);
-        res.json(result);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Get the lowdown on every seat in a coach
-app.get('/api/trains/:trainNo/coaches/:coachId/confidence', async (req, res) => {
-    try {
-        const { trainNo, coachId } = req.params;
-
-        const seats = await prisma.seatMaster.findMany({
-            where: { trainNo, coachId },
-            orderBy: { seatNo: 'asc' },
-        });
-
-        const results = await Promise.all(
-            seats.map(async (seat) => ({
-                seatNo: seat.seatNo,
-                seatType: seat.seatType,
-                ...(await calculateSeatConfidence(seat.id)),
-            }))
-        );
-
-        res.json({
-            trainNo,
-            coachId,
-            seats: results,
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// --- COACH CLASSIFICATION ---
-
-// Guess if it's LHB or ICF based on seat numbers
-app.get('/api/classify/:classType/:highestSeat', (req, res) => {
-    const classType = req.params.classType;
-    const highestSeat = parseInt(req.params.highestSeat);
-    const result = inferCoachType(highestSeat, classType);
-    res.json(result);
-});
+app.post('/api/reports', v2Stub);
+app.get('/api/seats/:seatId/confidence', v2Stub);
+app.get('/api/trains/:trainNo/coaches/:coachId/confidence', v2Stub);
+app.get('/api/classify/:classType/:highestSeat', v2Stub);
 
 // --- SEAT SWAPS ---
 // These endpoints are the OPTIONAL sync layer. The app works fully offline
@@ -147,6 +126,28 @@ app.get('/api/debug/swaps', async (_req, res) => {
 app.post('/api/swaps', async (req, res) => {
     try {
         const { trainNo, userId, currentCoachId, currentSeatNo, currentSeatType, desiredSeatType, journeyDate, reason } = req.body;
+
+        // RM-SW-013: Input validation
+        if (!trainNo || !userId || !currentCoachId || !currentSeatType || !desiredSeatType || !journeyDate) {
+            return res.status(400).json({ error: 'Missing required fields.' });
+        }
+        if (typeof currentSeatNo !== 'number' || currentSeatNo < 1 || currentSeatNo > 80) {
+            return res.status(400).json({ error: 'currentSeatNo must be between 1 and 80.' });
+        }
+        if (typeof currentCoachId !== 'string' || currentCoachId.length > 4) {
+            return res.status(400).json({ error: 'currentCoachId must be at most 4 characters.' });
+        }
+        if (currentSeatType === desiredSeatType) {
+            return res.status(400).json({ error: 'currentSeatType and desiredSeatType cannot be the same.' });
+        }
+
+        // RM-SW-013: Max 3 active (OPEN or ACCEPTED) swap offers per user
+        const activeCount = await prisma.swapRequest.count({
+            where: { userId, status: { in: ['OPEN', 'ACCEPTED'] } },
+        });
+        if (activeCount >= 3) {
+            return res.status(429).json({ error: 'Maximum 3 active swap offers per user. Cancel an existing one first.' });
+        }
 
         console.log(`[+] New swap offer received from ${userId.substring(0, 8)} for train ${trainNo} (${currentCoachId}-${currentSeatNo} -> ${desiredSeatType})`);
 
@@ -240,10 +241,11 @@ app.get('/api/swaps/:trainNo/:journeyDate/matches', async (req, res) => {
     }
 });
 
-// Accept a swap match
+// Accept a swap match — RM-SW-012: now creates a SwapSession
 app.post('/api/swaps/:swapId/accept', async (req, res) => {
     try {
         const swapId = parseInt(req.params.swapId);
+        const { matchedSwapId } = req.body; // The other swap being matched against
         const swap = await prisma.swapRequest.findUnique({ where: { id: swapId } });
 
         if (!swap) return res.status(404).json({ error: 'Swap not found' });
@@ -251,18 +253,51 @@ app.post('/api/swaps/:swapId/accept', async (req, res) => {
             return res.status(400).json({ error: `Can't accept a swap with status "${swap.status}"` });
         }
 
-        await prisma.swapRequest.update({
-            where: { id: swapId },
-            data: { status: 'ACCEPTED', updatedAt: new Date() },
+        // Determine session type and gather participant swap IDs
+        const participantIds = [swapId];
+        if (matchedSwapId) {
+            participantIds.push(parseInt(matchedSwapId));
+        } else if (swap.matchedWith) {
+            participantIds.push(swap.matchedWith);
+        }
+
+        // Figure out session type
+        const sessionType = participantIds.length === 2 ? 'DIRECT'
+            : participantIds.length === 3 ? 'TRIANGULAR' : 'CHAIN';
+
+        // Create the SwapSession
+        const session = await prisma.swapSession.create({
+            data: {
+                type: sessionType,
+                status: 'PENDING',
+                totalRequired: participantIds.length,
+                acceptedBy: swap.userId,
+                participants: {
+                    connect: participantIds.map(id => ({ id })),
+                },
+            },
         });
+
+        // Update all participating swaps
+        for (const pid of participantIds) {
+            await prisma.swapRequest.update({
+                where: { id: pid },
+                data: {
+                    status: 'ACCEPTED',
+                    sessionId: session.id,
+                    matchedWith: pid === swapId ? (participantIds.find(p => p !== swapId) || null) : swapId,
+                    updatedAt: new Date(),
+                },
+            });
+        }
 
         await prisma.swapEvent.create({
-            data: { swapId, eventType: 'ACCEPTED', actorId: swap.userId },
+            data: { swapId, eventType: 'ACCEPTED', actorId: swap.userId, metadata: JSON.stringify({ sessionId: session.id }) },
         });
 
-        broadcastSSE(swap.trainNo, swap.journeyDate, { type: 'SWAP_ACCEPTED', swapId });
+        broadcastSSE(swap.trainNo, swap.journeyDate, { type: 'SWAP_ACCEPTED', swapId, sessionId: session.id });
 
-        res.json({ success: true, message: 'Swap accepted! The other passenger will get a ping.' });
+        res.json({ success: true, sessionId: session.id, message: 'Swap accepted! Session created.' });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -321,6 +356,91 @@ app.post('/api/swaps/:swapId/cancel', async (req, res) => {
     }
 });
 
+// --- SWAP SESSION MANAGEMENT (RM-SW-012) ---
+
+// Complete a swap session — both parties confirm the physical swap happened
+app.post('/api/sessions/:sessionId/complete', async (req, res) => {
+    try {
+        const sessionId = parseInt(req.params.sessionId);
+        const session = await prisma.swapSession.findUnique({
+            where: { id: sessionId },
+            include: { participants: true },
+        });
+
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        if (session.status === 'COMPLETED') return res.status(400).json({ error: 'Session already completed.' });
+
+        // Mark all participants as COMPLETED
+        for (const swap of session.participants) {
+            await prisma.swapRequest.update({
+                where: { id: swap.id },
+                data: { status: 'COMPLETED' },
+            });
+            await prisma.swapEvent.create({
+                data: { swapId: swap.id, eventType: 'COMPLETED', actorId: swap.userId },
+            });
+        }
+
+        await prisma.swapSession.update({
+            where: { id: sessionId },
+            data: { status: 'COMPLETED', completedAt: new Date() },
+        });
+
+        const firstSwap = session.participants[0];
+        if (firstSwap) {
+            broadcastSSE(firstSwap.trainNo, firstSwap.journeyDate, { type: 'SESSION_COMPLETED', sessionId });
+        }
+
+        res.json({ success: true, message: 'Swap session completed successfully!' });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Fail/revert a swap session — something went wrong, put everyone back to OPEN
+app.post('/api/sessions/:sessionId/fail', async (req, res) => {
+    try {
+        const sessionId = parseInt(req.params.sessionId);
+        const session = await prisma.swapSession.findUnique({
+            where: { id: sessionId },
+            include: { participants: true },
+        });
+
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        if (session.status === 'COMPLETED') return res.status(400).json({ error: 'Cannot fail an already completed session.' });
+
+        // Revert all participants to OPEN
+        for (const swap of session.participants) {
+            await prisma.swapRequest.update({
+                where: { id: swap.id },
+                data: { status: 'OPEN', matchedWith: null, sessionId: null },
+            });
+            await prisma.swapEvent.create({
+                data: {
+                    swapId: swap.id,
+                    eventType: 'FAILED',
+                    actorId: swap.userId,
+                    metadata: JSON.stringify({ sessionId }),
+                },
+            });
+        }
+
+        await prisma.swapSession.update({
+            where: { id: sessionId },
+            data: { status: 'FAILED' },
+        });
+
+        const firstSwap = session.participants[0];
+        if (firstSwap) {
+            broadcastSSE(firstSwap.trainNo, firstSwap.journeyDate, { type: 'SESSION_FAILED', sessionId });
+        }
+
+        res.json({ success: true, message: 'Swap session failed. Participants reverted to OPEN.' });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Server-Sent Events stream for real-time updates (when online)
 const sseClients: Map<string, Set<any>> = new Map();
 
@@ -347,8 +467,12 @@ app.get('/api/swaps/:trainNo/:journeyDate/stream', (req, res) => {
     if (!sseClients.has(key)) sseClients.set(key, new Set());
     sseClients.get(key)!.add(res);
 
+    // Track SSE connection for observability
+    const connId = trackSSEConnect(trainNo, journeyDate, req.ip);
+
     req.on('close', () => {
         sseClients.get(key)?.delete(res);
+        trackSSEDisconnect(connId);
     });
 });
 
@@ -389,76 +513,16 @@ app.get('/api/swaps/:trainNo/:journeyDate/analytics', async (req, res) => {
     }
 });
 
-// --- PNR PROCESSING ---
-
-// Parse those IRCTC SMS messages users get
-app.post('/api/pnr/parse', (req, res) => {
-    try {
-        const { smsText } = req.body;
-        const parsed = parseIRCTCSMS(smsText);
-
-        if (!parsed) {
-            return res.status(400).json({ error: 'Could not parse that SMS. Doesn\'t look like IRCTC.' });
-        }
-
-        // Try to guess vacancy from the ticket details
-        const vacancy = inferVacancy(parsed);
-
-        res.json({
-            parsed,
-            vacancy: vacancy || null,
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// --- TOILET STATUS ---
-
-// Report if a toilet is sparkling or... not.
-app.post('/api/toilets', async (req, res) => {
-    try {
-        const { trainNo, coachId, toiletType, cleanlinessScore, waterAvailable, queueLength, deviceId } = req.body;
-
-        const status = await prisma.toiletStatus.create({
-            data: {
-                trainNo,
-                coachId,
-                toiletType,
-                cleanlinessScore,
-                waterAvailable,
-                queueLength: queueLength || 0,
-                reportedBy: hashPNR(deviceId),
-            },
-        });
-
-        res.status(201).json({ success: true, id: status.id });
-    } catch (error: any) {
-        res.status(400).json({ error: error.message });
-    }
-});
-
-// Get the latest condition of a toilet
-app.get('/api/toilets/:trainNo/:coachId', async (req, res) => {
-    try {
-        const { trainNo, coachId } = req.params;
-
-        const latest = await prisma.toiletStatus.findFirst({
-            where: { trainNo, coachId },
-            orderBy: { timestamp: 'desc' },
-        });
-
-        res.json(latest || { message: 'No reports yet for this coach\'s toilet.' });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
+// RM-SW-010: V2 endpoints — PNR + Toilets disabled
+app.post('/api/pnr/parse', v2Stub);
+app.post('/api/toilets', v2Stub);
+app.get('/api/toilets/:trainNo/:coachId', v2Stub);
 
 // --- USER REPUTATION ---
 
 app.get('/api/reputation/:deviceId', async (req, res) => {
     try {
-        const deviceId = hashPNR(req.params.deviceId);
+        const deviceId = req.params.deviceId;
         const rep = await prisma.userReputation.findUnique({
             where: { deviceId },
         });
@@ -469,138 +533,54 @@ app.get('/api/reputation/:deviceId', async (req, res) => {
     }
 });
 
-// --- TRAIN AVAILABILITY (Aggregated) ---
+// RM-SW-010: V2 endpoints — Availability + Utilities disabled
+app.get('/api/trains/:trainNo/availability', v2Stub);
+app.post('/api/utilities/toilet-queue', v2Stub);
+app.post('/api/utilities/theft-risk', v2Stub);
 
-// This pulls together everything we know about a train's availability
-app.get('/api/trains/:trainNo/availability', async (req, res) => {
+// ============================================================
+// RM-SW-011: Swap Expiry Cron Job — runs every 15 minutes
+// Finds OPEN swaps past their expiresAt and marks them EXPIRED.
+// ============================================================
+setInterval(async () => {
     try {
-        const { trainNo } = req.params;
-        const { from, to, date } = req.query;
-
-        // Fetch all seats and their latest status reports
-        const seats = await prisma.seatMaster.findMany({
-            where: { trainNo },
-            orderBy: [{ coachId: 'asc' }, { seatNo: 'asc' }],
-            include: {
-                reports: {
-                    orderBy: { timestamp: 'desc' },
-                    take: 1,
-                },
-            },
+        const now = new Date();
+        const expired = await prisma.swapRequest.findMany({
+            where: { status: 'OPEN', expiresAt: { lt: now } },
         });
 
-        if (seats.length === 0) {
-            return res.status(404).json({ error: `Never heard of train ${trainNo}.` });
-        }
-
-        // Bundle them up by class and coach for the app to display
-        const classeMap: Record<string, {
-            coaches: Record<string, {
-                seats: typeof seats;
-                coachType: string;
-            }>;
-        }> = {};
-
-        for (const seat of seats) {
-            if (!classeMap[seat.classType]) {
-                classeMap[seat.classType] = { coaches: {} };
-            }
-            if (!classeMap[seat.classType].coaches[seat.coachId]) {
-                classeMap[seat.classType].coaches[seat.coachId] = {
-                    seats: [],
-                    coachType: seat.coachType,
-                };
-            }
-            classeMap[seat.classType].coaches[seat.coachId].seats.push(seat);
-        }
-
-        const classFullNames: Record<string, string> = {
-            SL: 'Sleeper', '3A': 'AC 3 Tier', '2A': 'AC 2 Tier',
-            '1A': 'AC First Class', CC: 'Chair Car', EC: 'Executive Chair',
-        };
-
-        const classes = Object.entries(classeMap).map(([classType, classData]) => {
-            const coaches = Object.entries(classData.coaches).map(([coachId, coachData]) => {
-                const vacantBerths = coachData.seats
-                    .filter(s => {
-                        const latestReport = s.reports[0];
-                        return !latestReport || latestReport.status === 'EMPTY';
-                    })
-                    .map(s => ({
-                        berthNumber: s.seatNo,
-                        berthType: s.seatType.substring(0, 2) as any,
-                        fromStation: (from as string) || '',
-                        toStation: (to as string) || '',
-                        isVacant: true,
-                        coachName: coachId,
-                    }));
-
-                return {
-                    coachName: coachId,
-                    coachClass: classType,
-                    totalBerths: coachData.seats.length,
-                    vacantBerths,
-                    occupiedBerths: coachData.seats.length - vacantBerths.length,
-                };
+        for (const swap of expired) {
+            await prisma.swapRequest.update({
+                where: { id: swap.id },
+                data: { status: 'EXPIRED', updatedAt: now },
             });
+            await prisma.swapEvent.create({
+                data: { swapId: swap.id, eventType: 'EXPIRED', actorId: 'SYSTEM' },
+            });
+            broadcastSSE(swap.trainNo, swap.journeyDate, { type: 'OFFER_EXPIRED', swapId: swap.id });
+        }
 
-            const totalSeats = coaches.reduce((sum, c) => sum + c.totalBerths, 0);
-            const vacantSeats = coaches.reduce((sum, c) => sum + c.vacantBerths.length, 0);
-
-            return {
-                className: classType,
-                classFullName: classFullNames[classType] || classType,
-                totalSeats,
-                vacantSeats,
-                coaches,
-            };
-        });
-
-        res.json({
-            trainNumber: trainNo,
-            journeyDate: date || new Date().toISOString().split('T')[0],
-            chartStatus: 'PREPARED',
-            classes,
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        if (expired.length > 0) {
+            console.log(`[Cron] Expired ${expired.length} stale swap offer(s)`);
+        }
+    } catch (err) {
+        console.error('[Cron] Swap expiry check failed:', err);
     }
-});
-
-// --- SMART UTILITIES ---
-
-// Detect if someone is standing in line for the loo
-app.post('/api/utilities/toilet-queue', (req, res) => {
-    try {
-        const { gpsHistory } = req.body;
-        const result = detectToiletQueue(gpsHistory || []);
-        res.json(result);
-    } catch (error: any) {
-        res.status(400).json({ error: error.message });
-    }
-});
-
-// Check if the phone might be getting stolen (sudden movement + power cut)
-app.post('/api/utilities/theft-risk', (req, res) => {
-    try {
-        const { accelReadings, isPowerConnected, powerDisconnectedAt } = req.body;
-        const result = detectTheftRisk(
-            accelReadings || [],
-            isPowerConnected ?? true,
-            powerDisconnectedAt || null
-        );
-        res.json(result);
-    } catch (error: any) {
-        res.status(400).json({ error: error.message });
-    }
-});
+}, 15 * 60 * 1000); // Every 15 minutes
 
 // Fire it up! Bind to 0.0.0.0 so phones on the same Wi-Fi can reach us.
 app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`\n🚄 Server is live at http://localhost:${PORT}`);
-    console.log(`   Network URL: http://0.0.0.0:${PORT} (use your Wi-Fi IP)`);
-    console.log(`   Check health: http://localhost:${PORT}/api/health`);
-    console.log(`   DB Browser: Run 'npm run prisma:studio'\n`);
+    logger.info('Server started', {
+        port: PORT,
+        nodeEnv: process.env.NODE_ENV || 'development',
+        pid: process.pid,
+    });
+    console.log(`\n🚄 Seat Swap Sync Server v1.0.0`);
+    console.log(`   Local:   http://localhost:${PORT}`);
+    console.log(`   Network: http://0.0.0.0:${PORT}`);
+    console.log(`   Health:  http://localhost:${PORT}/api/health`);
+    console.log(`   Metrics: http://localhost:${PORT}/api/metrics`);
+    console.log(`   Studio:  Run 'npm run prisma:studio'\n`);
 });
 
 export default app;
