@@ -201,6 +201,7 @@ export default function SwapScreen() {
         if (!isFormValid || !currentType || !desiredType) return;
         setLoading(true);
 
+        console.log(`[SwapScreen] Registering swap for train=${trainNo}, coach=${coachId}, seat=${seatNo}, currentType=${currentType}, desiredType=${desiredType}`);
         await initMeshBridge();
 
         try {
@@ -213,6 +214,7 @@ export default function SwapScreen() {
                 reason,
             });
 
+            console.log(`[SwapScreen] Swap created locally, id=${swap.id}`);
             meshRef.current?.broadcastSwapOffer(swap);
             setMySwapId(swap.id);
             setLoading(false);
@@ -228,8 +230,11 @@ export default function SwapScreen() {
             const updatedOffers = await browseOffers(trainNo, journeyDate);
             setOffers(updatedOffers);
             await loadActiveSwap();
-            handleFindMatches();
+            const allSwaps = await getSwapsForTrain(trainNo, journeyDate);
+            const myMatches = findMyMatches(allSwaps, deviceId);
+            setMatches(myMatches);
         } catch (error: any) {
+            console.error(`[SwapScreen] Register failed:`, error);
             setLoading(false);
             Alert.alert('Can\'t Register', error.message || 'Something went wrong.');
         }
@@ -239,6 +244,7 @@ export default function SwapScreen() {
         setMatchLoading(true);
         const allSwaps = await getSwapsForTrain(trainNo, journeyDate);
         const myMatches = findMyMatches(allSwaps, deviceId);
+        console.log(`[SwapScreen] Finding matches... found: ${myMatches.length}`);
         setMatches(myMatches);
         setMatchLoading(false);
     };
@@ -256,6 +262,7 @@ export default function SwapScreen() {
                 {
                     text: 'Accept Swap',
                     onPress: async () => {
+                        console.log(`[SwapScreen] Accepting swap myId=${myParticipant.swapId}, otherId=${otherParticipant.swapId}`);
                         await acceptMatch(myParticipant.swapId, otherParticipant.swapId);
                         meshRef.current?.broadcastSwapAccept(otherParticipant.swapId, myParticipant.swapId);
                         setAcceptedIds(prev => [...prev, match.id]);
@@ -278,6 +285,7 @@ export default function SwapScreen() {
             {
                 text: 'Cancel Offer', style: 'destructive',
                 onPress: async () => {
+                    console.log(`[SwapScreen] Cancelling swap id=${swapId}`);
                     await cancelSwap(swapId);
                     meshRef.current?.broadcastSwapCancel(swapId);
                     AsyncStorage.removeItem('activeSwap');

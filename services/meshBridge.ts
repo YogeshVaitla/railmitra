@@ -9,6 +9,7 @@
  * - version, type, senderId, trainNo, timestamp, ttl, payload
  */
 
+import NetInfo, { NetInfoSubscription } from '@react-native-community/netinfo';
 import { NearbyMeshBridge } from './NearbyMeshBridge';
 import { getOrCreateDeviceId, LocalSwap, mergeRemoteSwaps, SeatType, SwapReason } from './swapStore';
 
@@ -304,8 +305,16 @@ export class CloudSyncBridge implements IMeshBridge {
         }, POLL_INTERVAL_MS);
     }
 
+    public async forcePoll(): Promise<void> {
+        console.log('[CloudSync] Force polling triggered (e.g. network restored)');
+        if (this.active) {
+            await this.fetchOffersFromServer();
+        }
+    }
+
     private async fetchOffersFromServer(): Promise<void> {
         try {
+            console.log('[CloudSync] Fetching offers from server...');
             const response = await fetchWithTimeout(
                 `${SYNC_SERVER_URL}/api/swaps/${this.trainNo}/${this.journeyDate}/browse`,
                 { timeout: 30000 } // Render free tier can take 30s to wake up!
@@ -321,6 +330,7 @@ export class CloudSyncBridge implements IMeshBridge {
             this.serverReachable = true;
             const data = await response.json();
             const serverOffers = data.offers || [];
+            console.log(`[CloudSync] Received ${serverOffers.length} offers from server`);
 
             // Count unique users (excluding self) as "peers"
             const uniqueUsers = new Set<string>();
@@ -501,6 +511,8 @@ export class HybridMeshBridge implements IMeshBridge {
     private peerCallbacks: PeerCountCallback[] = [];
     private nearbyPeerCount = 0;
     private cloudPeerCount = 0;
+    private netInfoUnsubscribe: NetInfoSubscription | null = null;
+    private isInternetReachable: boolean | null = null;
 
     constructor() {
         this.nearbyBridge = new NearbyMeshBridge();
@@ -523,6 +535,33 @@ export class HybridMeshBridge implements IMeshBridge {
             this.cloudPeerCount = count;
             this.peerCallbacks.forEach(cb => cb(this.nearbyPeerCount + this.cloudPeerCount));
         });
+
+        // Monitor Network changes
+        this.setupNetworkMonitoring();
+    }
+
+    private setupNetworkMonitoring() {
+        this.netInfoUnsubscribe = NetInfo.addEventListener(state => {
+            console.log(`[HybridMeshBridge] Network state changed. Connected: ${state.isConnected}, Internet Reachable: ${state.isInternetReachable}`);
+            
+            // Check if we just transitioned from no internet to internet
+            if (this.isInternetReachable === false && state.isInternetReachable === true) {
+                console.log('[HybridMeshBridge] Internet connection restored! Triggering immediate sync.');
+                // Force CloudBridge to fetch
+                if (this.cloudBridge.isActive()) {
+                    this.cloudBridge.forcePoll();
+                }
+                
+                // When WiFi state changes, Nearby Connections over WiFi Direct can sometimes drop or stagger.
+                // We'll log the peering state to see if restarting them is needed.
+                console.log(`[HybridMeshBridge] Current P2P peer count: ${this.nearbyBridge.getPeerCount()}`);
+            }
+            
+            // Update previous state
+            if (state.isInternetReachable !== null) {
+                this.isInternetReachable = state.isInternetReachable;
+            }
+        });
     }
 
     async startAdvertising(trainNo: string, journeyDate: string): Promise<void> {
@@ -541,17 +580,20 @@ export class HybridMeshBridge implements IMeshBridge {
     }
 
     broadcastSwapOffer(swap: LocalSwap): void {
+        console.log(`[HybridMeshBridge] Broadcasting offer ${swap.id} to both channels.`);
         // Broadcast through both channels
         this.nearbyBridge.broadcastSwapOffer(swap);
         this.cloudBridge.broadcastSwapOffer(swap);
     }
 
     broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
+        console.log(`[HybridMeshBridge] Broadcasting ACCEPT for ${swapId} matched with ${matchedSwapId}.`);
         this.nearbyBridge.broadcastSwapAccept(swapId, matchedSwapId);
         this.cloudBridge.broadcastSwapAccept(swapId, matchedSwapId);
     }
 
     broadcastSwapCancel(swapId: string): void {
+        console.log(`[HybridMeshBridge] Broadcasting CANCEL for ${swapId}.`);
         this.nearbyBridge.broadcastSwapCancel(swapId);
         this.cloudBridge.broadcastSwapCancel(swapId);
     }
@@ -586,6 +628,12 @@ export class HybridMeshBridge implements IMeshBridge {
         this.peerCallbacks = [];
         this.nearbyPeerCount = 0;
         this.cloudPeerCount = 0;
+        
+        if (this.netInfoUnsubscribe) {
+            this.netInfoUnsubscribe();
+            this.netInfoUnsubscribe = null;
+        }
+        console.log('[HybridMeshBridge] All mesh bridging stopped and listeners removed.');
     }
 }
 
