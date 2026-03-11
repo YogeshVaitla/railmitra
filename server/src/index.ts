@@ -149,7 +149,7 @@ app.post('/api/swaps', async (req, res) => {
             return res.status(429).json({ error: 'Maximum 3 active swap offers per user. Cancel an existing one first.' });
         }
 
-        console.log(`[+] New swap offer received from ${userId.substring(0, 8)} for train ${trainNo} (${currentCoachId}-${currentSeatNo} -> ${desiredSeatType})`);
+        logger.info(`[+] New swap offer received from ${userId.substring(0, 8)} for train ${trainNo} (${currentCoachId}-${currentSeatNo} -> ${desiredSeatType})`);
 
         // Duplicate check: same seat on same train+date can't have two active offers
         const existingOffer = await prisma.swapRequest.findFirst({
@@ -561,10 +561,10 @@ setInterval(async () => {
         }
 
         if (expired.length > 0) {
-            console.log(`[Cron] Expired ${expired.length} stale swap offer(s)`);
+            logger.info(`[Cron] Expired ${expired.length} stale swap offer(s)`);
         }
     } catch (err) {
-        console.error('[Cron] Swap expiry check failed:', err);
+        logger.error('[Cron] Swap expiry check failed:', { error: err });
     }
 }, 15 * 60 * 1000); // Every 15 minutes
 
@@ -575,12 +575,7 @@ app.listen(Number(PORT), '0.0.0.0', () => {
         nodeEnv: process.env.NODE_ENV || 'development',
         pid: process.pid,
     });
-    console.log(`\n🚄 Seat Swap Sync Server v1.0.0`);
-    console.log(`   Local:   http://localhost:${PORT}`);
-    console.log(`   Network: http://0.0.0.0:${PORT}`);
-    console.log(`   Health:  http://localhost:${PORT}/api/health`);
-    console.log(`   Metrics: http://localhost:${PORT}/api/metrics`);
-    console.log(`   Studio:  Run 'npm run prisma:studio'\n`);
+    logger.info(`\n🚄 Seat Swap Sync Server v1.0.0\n   Local:   http://localhost:${PORT}\n   Network: http://0.0.0.0:${PORT}\n   Health:  http://localhost:${PORT}/api/health\n   Metrics: http://localhost:${PORT}/api/metrics\n   Studio:  Run 'npm run prisma:studio'\n`);
 });
 
 export default app;
