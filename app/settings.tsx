@@ -10,8 +10,10 @@ import {
     Text,
     TouchableOpacity,
     View,
+    Alert,
 } from 'react-native';
 import Colors from '../constants/Colors';
+import { clearAllSwapData } from '../services/swapStore';
 import { getLanguage, Language, LANGUAGES, setLanguage, t } from '../services/localization';
 
 const APP_VERSION = '1.0.0';
@@ -36,6 +38,24 @@ export default function SettingsScreen() {
 
     const sendEmail = () => {
         Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=RailMitra App Support`).catch(() => { });
+    };
+
+    const handleClearData = () => {
+        Alert.alert(
+            "Clear All App Data",
+            "Are you sure? This will delete all your swap history and reset your device identity.",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete Everything",
+                    style: "destructive",
+                    onPress: async () => {
+                        await clearAllSwapData();
+                        router.replace('/');
+                    }
+                }
+            ]
+        );
     };
 
     return (
@@ -95,25 +115,6 @@ export default function SettingsScreen() {
                                 {currentLangOption.shortLabel}
                             </Text>
                         </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.menuItem}
-                        onPress={() => router.push('/favorites')}
-                    >
-                        <View style={styles.menuLeft}>
-                            <LinearGradient
-                                colors={[Colors.danger.start, Colors.danger.end]}
-                                style={styles.menuIcon}
-                            >
-                                <Ionicons name="heart" size={18} color="#fff" />
-                            </LinearGradient>
-                            <View>
-                                <Text style={styles.menuTitle}>{t('favorites')}</Text>
-                                <Text style={styles.menuSubtitle}>Your saved train searches</Text>
-                            </View>
-                        </View>
-                        <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
                     </TouchableOpacity>
                 </View>
 
@@ -211,6 +212,25 @@ export default function SettingsScreen() {
                             </View>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={Colors.text.tertiary} />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Danger Zone */}
+                <Text style={styles.sectionTitle}>Danger Zone</Text>
+                <View style={[styles.section, { marginBottom: 32 }]}>
+                    <TouchableOpacity style={styles.menuItem} onPress={handleClearData}>
+                        <View style={styles.menuLeft}>
+                            <LinearGradient
+                                colors={[Colors.danger.start, Colors.danger.end]}
+                                style={styles.menuIcon}
+                            >
+                                <Ionicons name="trash" size={18} color="#fff" />
+                            </LinearGradient>
+                            <View>
+                                <Text style={[styles.menuTitle, { color: Colors.danger.start }]}>Clear All App Data</Text>
+                                <Text style={styles.menuSubtitle}>Reset device state & delete history</Text>
+                            </View>
+                        </View>
                     </TouchableOpacity>
                 </View>
 

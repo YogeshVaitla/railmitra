@@ -653,7 +653,7 @@ export async function getSession(sessionId: string): Promise<SwapSession | null>
  * Wipe everything — for development/testing only.
  */
 export async function clearAllSwapData(): Promise<void> {
-    await AsyncStorage.multiRemove([SWAPS_KEY, EVENTS_KEY, SESSIONS_KEY]);
+    await AsyncStorage.multiRemove([DEVICE_ID_KEY, SWAPS_KEY, EVENTS_KEY, SESSIONS_KEY]);
 }
 
 /**

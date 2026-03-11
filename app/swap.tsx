@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,6 +33,8 @@ export default function SwapScreen() {
     const [trainNo, setTrainNo] = useState('');
     const [journeyDate] = useState(new Date().toISOString().split('T')[0]);
     const [deviceId, setDeviceId] = useState('');
+    const [tempTrainNo, setTempTrainNo] = useState('');
+    const [isEditingTrain, setIsEditingTrain] = useState(true);
 
     // --- Mesh State ---
     const meshRef = useRef<IMeshBridge | null>(null);
@@ -121,12 +123,42 @@ export default function SwapScreen() {
         };
     }, []);
 
+    // Sync tempTrainNo when trainNo restores from storage
+    useEffect(() => {
+        if (trainNo && !activeSwapObj) {
+            setTempTrainNo(trainNo);
+            setIsEditingTrain(false);
+        }
+    }, [trainNo]);
+    
+    // Auto collapse edit mode if we have a submitted active swap
+    useEffect(() => {
+        if (submitted) setIsEditingTrain(false);
+    }, [submitted]);
+
     // Load active swap when device ID is set
     useEffect(() => {
         if (deviceId) loadActiveSwap();
     }, [deviceId, hasNewMatch]);
 
     // --- Handlers ---
+    const handleSetTrain = () => {
+        if (tempTrainNo.length >= 4) {
+            setTrainNo(tempTrainNo);
+            setIsEditingTrain(false);
+            setHasBrowsed(false);
+            setOffers([]);
+            setActiveTab('browse');
+        }
+    };
+
+    // Auto-fetch swaps when trainNo is successfully submitted
+    useEffect(() => {
+        if (trainNo.length >= 4 && activeTab === 'browse' && !hasBrowsed && !browseLoading) {
+            handleBrowse();
+        }
+    }, [trainNo, activeTab, hasBrowsed, browseLoading]);
+
     const initMeshBridge = async () => {
         if (!trainNo || trainNo.length < 4) return;
         if (!meshRef.current || !meshRef.current.isActive()) {
@@ -330,6 +362,53 @@ export default function SwapScreen() {
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Seat Swap</Text>
                     <View style={{ width: 42 }} />
+                </View>
+
+                {/* Train Context Header */}
+                <View style={styles.trainContextHeader}>
+                    {isEditingTrain && !submitted ? (
+                        <View style={styles.trainInputContainer}>
+                            <Text style={styles.trainInputPrompt}>Enter Train Number to See Swaps</Text>
+                            <View style={styles.trainInputFieldWrapper}>
+                                <Ionicons name="train-outline" size={20} color={Colors.text.tertiary} style={{ marginLeft: 12 }} />
+                                <TextInput
+                                    style={styles.trainInputField}
+                                    placeholder="e.g. 12423"
+                                    placeholderTextColor={Colors.text.tertiary}
+                                    value={tempTrainNo}
+                                    onChangeText={setTempTrainNo}
+                                    keyboardType="number-pad"
+                                    maxLength={5}
+                                />
+                                <TouchableOpacity 
+                                    onPress={handleSetTrain} 
+                                    disabled={tempTrainNo.length < 4}
+                                    style={[styles.trainInputGoBtn, tempTrainNo.length < 4 && { opacity: 0.5 }]}
+                                >
+                                    <Text style={styles.trainInputGoText}>Go</Text>
+                                    <Ionicons name="arrow-forward" size={16} color="#fff" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    ) : (
+                        <View style={styles.trainPillContainer}>
+                            <View style={styles.trainPill}>
+                                <Text style={styles.trainPillEmoji}>🚄</Text>
+                                <Text style={styles.trainPillText}>Train {trainNo} • Today</Text>
+                                {!submitted && (
+                                    <TouchableOpacity 
+                                        onPress={() => {
+                                            setIsEditingTrain(true);
+                                            setTempTrainNo(trainNo);
+                                        }} 
+                                        style={styles.trainEditBtn}
+                                    >
+                                        <Ionicons name="pencil" size={14} color={Colors.primary.start} />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </View>
+                    )}
                 </View>
 
                 <View style={{ marginBottom: 16 }}>

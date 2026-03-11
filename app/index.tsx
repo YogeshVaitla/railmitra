@@ -12,6 +12,7 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View,
 } from 'react-native';
 import Colors from '../constants/Colors';
@@ -31,6 +32,7 @@ export default function HomeScreen() {
     const [showMenu, setShowMenu] = useState(false);
     const [deviceId, setDeviceId] = useState('');
     const menuSlide = useRef(new Animated.Value(-width)).current;
+    const backdropFade = useRef(new Animated.Value(0)).current;
 
     // Animations
     const fadeIn = useRef(new Animated.Value(0)).current;
@@ -81,12 +83,18 @@ export default function HomeScreen() {
     };
 
     const closeMenu = () => {
-        Animated.timing(menuSlide, { toValue: -width, duration: 250, useNativeDriver: true }).start(() => setShowMenu(false));
+        Animated.parallel([
+            Animated.timing(menuSlide, { toValue: -width, duration: 250, useNativeDriver: true }),
+            Animated.timing(backdropFade, { toValue: 0, duration: 250, useNativeDriver: true })
+        ]).start(() => setShowMenu(false));
     };
 
     const openMenu = () => {
         setShowMenu(true);
-        Animated.spring(menuSlide, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
+        Animated.parallel([
+            Animated.spring(menuSlide, { toValue: 0, tension: 40, friction: 8, useNativeDriver: true }),
+            Animated.timing(backdropFade, { toValue: 1, duration: 250, useNativeDriver: true })
+        ]).start();
     };
 
     const currentLangOption = LANGUAGES.find(l => l.code === lang) || LANGUAGES[0];
@@ -247,7 +255,9 @@ export default function HomeScreen() {
                 onRequestClose={closeMenu}
             >
                 <View style={styles.menuOverlay}>
-                    <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={closeMenu} />
+                    <TouchableWithoutFeedback onPress={closeMenu}>
+                        <Animated.View style={[styles.menuBackdrop, { backgroundColor: '#000', opacity: backdropFade.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }]} />
+                    </TouchableWithoutFeedback>
                     <Animated.View style={[styles.menuDrawer, { transform: [{ translateX: menuSlide }] }]}>
                         <View style={styles.menuContainer}>
                             <View style={styles.menuHeader}>
@@ -376,7 +386,7 @@ const styles = StyleSheet.create({
 
     // Menu
     menuOverlay: { flex: 1, flexDirection: 'row' },
-    menuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+    menuBackdrop: { flex: 1 },
     menuDrawer: { width: '75%', maxWidth: 320, backgroundColor: Colors.card.background, height: '100%' },
     menuContainer: { flex: 1, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingHorizontal: 24 },
     menuHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 },
