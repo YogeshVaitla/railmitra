@@ -15,7 +15,7 @@ import {
     TouchableWithoutFeedback,
     View,
 } from 'react-native';
-import Colors from '../constants/Colors';
+import { Colors } from '../constants/Colors';
 import { getLanguage, Language, LANGUAGES, setLanguage } from '../services/localization';
 import { getOrCreateDeviceId } from '../services/swapStore';
 
@@ -65,7 +65,7 @@ export default function HomeScreen() {
                 Animated.timing(floatAnim2, { toValue: 0, duration: 2200, useNativeDriver: true })
             ])
         ).start();
-    }, []);
+    }, [fadeIn, slideUp, floatAnim1, floatAnim2]);
 
     // Android back button exits app from home screen
     useEffect(() => {

@@ -14,7 +14,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import Colors from '../constants/Colors';
+import { Colors } from '../constants/Colors';
 import { parsePNR, getPNRAnalytics, PNRResult, PNRAnalytics, isUsingLiveAPI } from '../services/apiService';
 
 export default function PNRScreen() {

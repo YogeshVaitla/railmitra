@@ -10,7 +10,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import Colors from '../constants/Colors';
+import { Colors } from '../constants/Colors';
 import { FavoriteSearch } from '../models/types';
 import { getFavorites, removeFavorite } from '../services/favoritesService';
 import { t } from '../services/localization';

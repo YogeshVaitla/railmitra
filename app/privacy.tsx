@@ -9,7 +9,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import Colors from '../constants/Colors';
+import { Colors } from '../constants/Colors';
 
 export default function PrivacyPolicyScreen() {
     return (

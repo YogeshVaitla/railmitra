@@ -3,7 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { Component, useEffect, useState } from 'react';
 import { Animated, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Colors from '../constants/Colors';
+import { Colors } from '../constants/Colors';
 
 // --- Error Boundary ---
 // Catches unhandled JS errors so the app shows a friendly screen instead of crashing to white.
@@ -94,7 +94,7 @@ export default function RootLayout() {
         toValue: 0, duration: 400, useNativeDriver: true,
       }).start(() => setIsReady(true));
     }, 2200);
-  }, []);
+  }, [trainSlide, trainScale, titleFade, subtitleFade, dotPulse, splashFade]);
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background.primary }}>

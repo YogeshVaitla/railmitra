@@ -58,13 +58,13 @@ export async function calculateSeatConfidence(
     }
 
     // Fetch trust scores for all unique reporters
-    const deviceIds = [...new Set(reports.map(r => r.deviceId))];
+    const deviceIds = [...new Set(reports.map((r: any) => r.deviceId))];
     const reputations = await prisma.userReputation.findMany({
         where: { deviceId: { in: deviceIds } },
     });
 
     const trustMap = new Map<string, number>();
-    reputations.forEach(rep => {
+    reputations.forEach((rep: any) => {
         trustMap.set(rep.deviceId, rep.trustScore);
     });
 
@@ -350,7 +350,7 @@ export async function findSwapMatches(trainNo: string, journeyDate: string): Pro
     }
 
     // ---- PASS 2: TRIANGULAR MATCHES (Cycle detection via DFS) ----
-    const unmatched = requests.filter(r => !matchedIds.has(r.id));
+    const unmatched = requests.filter((r: any) => !matchedIds.has(r.id));
 
     // Build adjacency: "who can receive from whom"
     // Edge A → B means A's desiredSeatType === B's currentSeatType

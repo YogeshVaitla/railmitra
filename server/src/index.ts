@@ -52,14 +52,14 @@ app.use('/api/swaps', swapLimiter);
 app.use(requestTelemetry);
 
 // Deep health check — pings DB, checks memory, SSE load
-app.get('/api/health', async (_req, res) => {
+app.get('/api/health', async (_req: express.Request, res: express.Response) => {
     const health = await getHealthStatus(prisma);
     const statusCode = health.status === 'unhealthy' ? 503 : 200;
     res.status(statusCode).json(health);
 });
 
 // --- Internal: Metrics Endpoint ---
-app.get('/api/metrics', (_req, res) => {
+app.get('/api/metrics', (_req: express.Request, res: express.Response) => {
     const snap = metrics.snapshot();
     const sseStats = getSSEStats();
     res.json({
@@ -96,7 +96,7 @@ app.get('/', (_req, res) => {
 // RM-SW-010: V2 ENDPOINTS — Disabled for V1, return 501
 // ============================================================
 
-const v2Stub = (_req: any, res: any) => {
+const v2Stub = (_req: express.Request, res: express.Response) => {
     res.status(501).json({ error: 'This feature is coming in V2' });
 };
 
