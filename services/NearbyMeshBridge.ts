@@ -60,6 +60,7 @@ export class NearbyMeshBridge implements IMeshBridge {
 
     // RM-SW-022: Gossip relay LRU cache — stores hashes of seen messages
     private seenMessageHashes: string[] = [];
+    private peerGcTimer: ReturnType<typeof setInterval> | null = null;
 
     /**
      * Check if the native module is actually available
@@ -254,6 +255,12 @@ export class NearbyMeshBridge implements IMeshBridge {
 
         this.eventEmitter = new NativeEventEmitter(NearbyConnections);
 
+        if (!this.peerGcTimer) {
+            this.peerGcTimer = setInterval(() => {
+                this.recalculatePeerCount();
+            }, 10000);
+        }
+
         // Peer found — RM-SW-020: deduplicate by endpointName (deviceId)
         this.subscriptions.push(
             this.eventEmitter.addListener('onEndpointFound', (event) => {
@@ -303,6 +310,13 @@ export class NearbyMeshBridge implements IMeshBridge {
         this.subscriptions.push(
             this.eventEmitter.addListener('onPayloadReceived', async (event) => {
                 try {
+                    // Update lastSeen for this peer to prevent GC
+                    const peer = this.connectedPeers.get(event.endpointId);
+                    if (peer) {
+                        peer.lastSeen = Date.now();
+                        this.connectedPeers.set(event.endpointId, peer);
+                    }
+
                     const rawData = JSON.parse(event.data);
 
                     // RM-SW-022: Unwrap gossip envelope if present
@@ -367,6 +381,13 @@ export class NearbyMeshBridge implements IMeshBridge {
                         if (success) {
                             // Notify UI to refresh (empty array signifies general state update)
                             this.swapCallbacks.forEach(cb => cb([]));
+                        } else {
+                            // RM-SW-021: We were a 3rd party observer. Both swaps matched, so we should hide them
+                            console.log(`[NearbyP2P] Handling 3rd party acceptance for swaps ${myActualId} and ${theirStoredId}`);
+                            const { updateSwapStatus } = require('./swapStore');
+                            await updateSwapStatus(`p2p_${myActualId}`, 'ACCEPTED');
+                            await updateSwapStatus(theirStoredId, 'ACCEPTED');
+                            this.swapCallbacks.forEach(cb => cb([]));
                         }
                     } else if (data.type === 'SWAP_CANCEL') {
                         // Remote user cancelled their swap offer
@@ -402,6 +423,17 @@ export class NearbyMeshBridge implements IMeshBridge {
 
     // RM-SW-020: Centralized peer count recalculation with dedup by name
     private recalculatePeerCount(): void {
+        const now = Date.now();
+        const PEER_TIMEOUT_MS = 60000; // 60 seconds
+
+        // RM-SW-022: GC stale peers
+        for (const [endpointId, peer] of this.connectedPeers.entries()) {
+            if (now - peer.lastSeen > PEER_TIMEOUT_MS) {
+                console.log(`[NearbyP2P] GCing stale peer ${endpointId} (${peer.name})`);
+                this.connectedPeers.delete(endpointId);
+            }
+        }
+
         const uniqueNames = new Set(
             Array.from(this.connectedPeers.values()).map(p => p.name).filter(Boolean)
         );
@@ -457,7 +489,7 @@ export class NearbyMeshBridge implements IMeshBridge {
             const { getSwapsForTrain } = require('./swapStore');
             const localSwaps = await getSwapsForTrain(this.trainNo, this.journeyDate);
             const myOffers = localSwaps.filter((s: LocalSwap) =>
-                s.isLocal && s.status === 'OPEN'
+                s.status === 'OPEN'
             );
 
             if (myOffers.length > 0) {
@@ -490,7 +522,7 @@ export class NearbyMeshBridge implements IMeshBridge {
     }
 
     // RM-SW-021: Broadcast swap acceptance with proper format
-    broadcastSwapAcceptance(swapId: string, matchedSwapId: string): void {
+    broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
         if (!NearbyConnections || !this.active) return;
 
         const innerPayload = {
@@ -504,10 +536,6 @@ export class NearbyMeshBridge implements IMeshBridge {
         NearbyConnections.sendPayload(payload).catch(() => { });
     }
 
-    // Keep the old method name for backward compat
-    broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
-        this.broadcastSwapAcceptance(swapId, matchedSwapId);
-    }
 
     broadcastSwapCancel(swapId: string): void {
         if (!NearbyConnections || !this.active) return;
@@ -543,6 +571,11 @@ export class NearbyMeshBridge implements IMeshBridge {
         this.active = false;
         this.peerCount = 0;
         this.connectedPeers.clear();
+
+        if (this.peerGcTimer) {
+            clearInterval(this.peerGcTimer);
+            this.peerGcTimer = null;
+        }
 
         // Clear retry timers
         if (this.advertiseRetryTimer) clearTimeout(this.advertiseRetryTimer);
