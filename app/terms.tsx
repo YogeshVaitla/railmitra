@@ -33,7 +33,7 @@ export default function TermsScreen() {
                 </View>
 
                 <Section title="1. Acceptance of Terms">
-                    By downloading, installing, or using RailMitra ("the app"), you agree to
+                    By downloading, installing, or using RailMitra (&quot;the app&quot;), you agree to
                     be bound by these Terms and Conditions. If you do not agree with any part
                     of these terms, you must not use the app.
                 </Section>

@@ -33,7 +33,7 @@ export default function PrivacyPolicyScreen() {
                 </View>
 
                 <Section title="1. Introduction">
-                    RailMitra ("we", "our", or "the app") is committed to protecting your privacy.
+                    RailMitra (&quot;we&quot;, &quot;our&quot;, or &quot;the app&quot;) is committed to protecting your privacy.
                     This Privacy Policy explains how we collect, use, and safeguard your information
                     when you use our mobile application.
                 </Section>
@@ -81,7 +81,7 @@ export default function PrivacyPolicyScreen() {
 
                 <Section title="8. Changes to This Policy">
                     We may update this Privacy Policy from time to time. Any changes will
-                    be reflected in the app with an updated "Last updated" date. We encourage
+                    be reflected in the app with an updated &quot;Last updated&quot; date. We encourage
                     you to review this policy periodically.
                 </Section>
 

@@ -1,3 +1,4 @@
+/* global __dirname, require, module */
 /**
  * Expo Config Plugin — withNearbyConnections
  * 
