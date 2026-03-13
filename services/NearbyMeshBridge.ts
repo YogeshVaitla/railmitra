@@ -365,19 +365,22 @@ export class NearbyMeshBridge implements IMeshBridge {
                         }
                     } else if (data.type === 'SWAP_ACCEPT') {
                         // RM-SW-021: The remote user accepted a swap.
-                        // data.swapId = OUR local swap ID (with p2p_ prefix from their perspective)
-                        // data.matchedSwapId = THEIR swap ID (raw from their device)
+                        // Convention:
+                        // - data.swapId        = OUR swap ID as the sender sees it (raw UUID)
+                        // - data.matchedSwapId = THEIR swap ID on the sender (raw UUID)
+                        //
+                        // Locally, we store remote/offline swaps with a p2p_ prefix,
+                        // so translate both IDs into the form our swapStore uses.
                         const { acceptMatch } = require('./swapStore');
 
-                        // Strip p2p_/cloud_ prefixes to find our local swap
-                        const myActualId = data.swapId.replace(/^p2p_/, '').replace(/^cloud_/, '');
+                        const myStoredId = data.swapId.startsWith('p2p_') ? data.swapId : `p2p_${data.swapId}`;
+                        const theirStoredId = data.matchedSwapId.startsWith('p2p_')
+                            ? data.matchedSwapId
+                            : `p2p_${data.matchedSwapId}`;
 
-                        // Their ID needs p2p_ prefix to find it in our store
-                        const theirStoredId = data.matchedSwapId.startsWith('p2p_') ? data.matchedSwapId : `p2p_${data.matchedSwapId}`;
+                        console.log('[NearbyP2P] Received SWAP_ACCEPT:', myStoredId, 'WITH', theirStoredId);
 
-                        console.log('[NearbyP2P] Received SWAP_ACCEPT:', myActualId, 'WITH', theirStoredId);
-
-                        const success = await acceptMatch(myActualId, theirStoredId);
+                        const success = await acceptMatch(myStoredId, theirStoredId);
                         if (success) {
                             // Notify UI to refresh (empty array signifies general state update)
                             this.swapCallbacks.forEach(cb => cb([]));
@@ -424,7 +427,7 @@ export class NearbyMeshBridge implements IMeshBridge {
     // RM-SW-020: Centralized peer count recalculation with dedup by name
     private recalculatePeerCount(): void {
         const now = Date.now();
-        const PEER_TIMEOUT_MS = 60000; // 60 seconds
+        const PEER_TIMEOUT_MS = 20000; // 20 seconds — clear stale peers faster for more accurate counts
 
         // RM-SW-022: GC stale peers
         for (const [endpointId, peer] of this.connectedPeers.entries()) {
