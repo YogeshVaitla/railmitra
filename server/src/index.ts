@@ -194,9 +194,6 @@ app.post('/api/swaps', async (req, res) => {
             },
         });
 
-        // Try auto-matching immediately
-        const matches = await findSwapMatches(trainNo, journeyDate);
-
         // Broadcast to SSE clients
         broadcastSSE(trainNo, journeyDate, { type: 'NEW_OFFER', swap });
 
@@ -204,7 +201,6 @@ app.post('/api/swaps', async (req, res) => {
             success: true,
             swapId: swap.id,
             priorityScore,
-            immediateMatches: matches.length,
         });
     } catch (error: any) {
         res.status(400).json({ error: error.message });

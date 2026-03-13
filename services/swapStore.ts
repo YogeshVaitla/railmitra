@@ -394,10 +394,11 @@ export async function mergeRemoteSwaps(remoteSwaps: LocalSwap[]): Promise<{ adde
         // Don't merge our own swaps back
         if (remote.deviceId === deviceId) continue;
 
-        // Find by unique key: (deviceId + trainNo + seatNo + journeyDate)
+        // Find by unique key: (deviceId + trainNo + coachId + seatNo + journeyDate)
         const existingIdx = swaps.findIndex(
             s => s.deviceId === remote.deviceId &&
                 s.trainNo === remote.trainNo &&
+                s.currentCoachId === remote.currentCoachId &&
                 s.currentSeatNo === remote.currentSeatNo &&
                 s.journeyDate === remote.journeyDate
         );
