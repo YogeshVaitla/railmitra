@@ -446,16 +446,35 @@ export class CloudSyncBridge implements IMeshBridge {
         return null;
     }
 
+    /**
+     * Broadcast acceptance of a swap via the cloud API.
+     *
+     * swapId:        the OTHER person's local swap ID (may be a cloud_ wrapper)
+     * matchedSwapId: OUR local swap ID (created on this device)
+     *
+     * We resolve both to server IDs so the backend can create a proper
+     * SwapSession with all participants, instead of a 1-sided session.
+     */
     broadcastSwapAccept(swapId: string, matchedSwapId: string): void {
-        // Accept the OTHER person's swap on the server
-        const serverId = this.resolveServerId(matchedSwapId);
-        if (serverId) {
-            fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps/${serverId}/accept`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 30000, // Render cold start
-            }).catch(() => { });
+        // Resolve the primary swap (path param) on the server — this is the other person's offer
+        const primaryServerId = this.resolveServerId(swapId);
+        if (!primaryServerId) {
+            return;
         }
+
+        // Resolve our own counterpart swap on the server, if known
+        const counterpartServerId = this.resolveServerId(matchedSwapId);
+        const body: { matchedSwapId?: string } = {};
+        if (counterpartServerId) {
+            body.matchedSwapId = counterpartServerId;
+        }
+
+        fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps/${primaryServerId}/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000, // Render cold start
+            body: JSON.stringify(body),
+        }).catch(() => { });
     }
 
     broadcastSwapCancel(swapId: string): void {
