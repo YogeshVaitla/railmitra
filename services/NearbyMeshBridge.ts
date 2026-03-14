@@ -386,9 +386,9 @@ export class NearbyMeshBridge implements IMeshBridge {
                             this.swapCallbacks.forEach(cb => cb([]));
                         } else {
                             // RM-SW-021: We were a 3rd party observer. Both swaps matched, so we should hide them
-                            console.log(`[NearbyP2P] Handling 3rd party acceptance for swaps ${myActualId} and ${theirStoredId}`);
+                            console.log(`[NearbyP2P] Handling 3rd party acceptance for swaps ${myStoredId} and ${theirStoredId}`);
                             const { updateSwapStatus } = require('./swapStore');
-                            await updateSwapStatus(`p2p_${myActualId}`, 'ACCEPTED');
+                            await updateSwapStatus(myStoredId, 'ACCEPTED');
                             await updateSwapStatus(theirStoredId, 'ACCEPTED');
                             this.swapCallbacks.forEach(cb => cb([]));
                         }
