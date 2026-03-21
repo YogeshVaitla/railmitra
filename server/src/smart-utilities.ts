@@ -207,7 +207,7 @@ export function detectTheftRisk(
     if (accelReadings.length === 0) {
         return {
             riskDetected: false,
-            riskLevel: 'LOW',
+            riskLevel: 'MEDIUM',
             triggerReason: 'Power disconnected, no accelerometer data available',
             recommendedAction: 'Enable motion sensors for theft protection',
             timestamp: currentTime,
