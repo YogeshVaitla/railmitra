@@ -132,6 +132,10 @@ jobs:
     steps:
       - name: Trigger Render deploy hook
         run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "Skipping deploy trigger: RENDER_DEPLOY_HOOK_URL secret is not set."
+            exit 0
+          fi
           curl -X POST "$RENDER_DEPLOY_HOOK_URL" \
             --fail --silent --show-error
         env:
