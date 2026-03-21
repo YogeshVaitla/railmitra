@@ -22,6 +22,19 @@ const SWAPS_KEY = '@seatseeker_swaps';
 const EVENTS_KEY = '@seatseeker_swap_events';
 const SESSIONS_KEY = '@seatseeker_swap_sessions';
 
+// --- Mutex Lock for Safe Storage Access ---
+class AsyncMutex {
+    private mutex = Promise.resolve();
+    lock(): Promise<() => void> {
+        let unlockNext!: () => void;
+        const willLock = new Promise<void>(resolve => unlockNext = resolve);
+        const willUnlock = this.mutex.then(() => unlockNext);
+        this.mutex = this.mutex.then(() => willLock);
+        return willUnlock;
+    }
+}
+const storeMutex = new AsyncMutex();
+
 // --- Security Constants ---
 const MAX_ACTIVE_SWAPS_PER_DEVICE = 3;   // Rate limit: max active swaps at once
 const MAX_TOTAL_SWAPS_STORED = 200;       // Storage cap to prevent device bloat
@@ -284,18 +297,20 @@ export async function createLocalSwap(params: {
     desiredSeatType: SeatType;
     reason: SwapReason;
 }): Promise<LocalSwap> {
-    // Validate input
-    const validationError = validateSwapInput(params);
-    if (validationError) throw new Error(validationError);
+    const unlock = await storeMutex.lock();
+    try {
+        // Validate input
+        const validationError = validateSwapInput(params);
+        if (validationError) throw new Error(validationError);
 
-    const deviceId = await getOrCreateDeviceId();
-    const swaps = await loadSwaps();
+        const deviceId = await getOrCreateDeviceId();
+        const swaps = await loadSwaps();
 
-    // Rate limit: max active swaps per device
-    const myActiveSwaps = swaps.filter(s => s.deviceId === deviceId && (s.status === 'OPEN' || s.status === 'MATCHED'));
-    if (myActiveSwaps.length >= MAX_ACTIVE_SWAPS_PER_DEVICE) {
-        throw new Error(`You already have ${MAX_ACTIVE_SWAPS_PER_DEVICE} active swap offers. Cancel one first.`);
-    }
+        // Rate limit: max active swaps per device
+        const myActiveSwaps = swaps.filter(s => s.deviceId === deviceId && (s.status === 'OPEN' || s.status === 'MATCHED'));
+        if (myActiveSwaps.length >= MAX_ACTIVE_SWAPS_PER_DEVICE) {
+            throw new Error(`You already have ${MAX_ACTIVE_SWAPS_PER_DEVICE} active swap offers. Cancel one first.`);
+        }
 
     // Duplicate check: same device, same seat
     const duplicate = swaps.find(
@@ -328,17 +343,20 @@ export async function createLocalSwap(params: {
         isLocal: true,
     };
 
-    swaps.push(swap);
-    const capped = await enforceStorageCap(swaps);
-    await saveSwaps(capped);
+        swaps.push(swap);
+        const capped = await enforceStorageCap(swaps);
+        await saveSwaps(capped);
 
-    // Log the creation event
-    await logSwapEvent(swap.id, 'CREATED', deviceId, {
-        reason: params.reason,
-        priorityScore: swap.priorityScore,
-    });
+        // Log the creation event
+        await logSwapEvent(swap.id, 'CREATED', deviceId, {
+            reason: params.reason,
+            priorityScore: swap.priorityScore,
+        });
 
-    return swap;
+        return swap;
+    } finally {
+        unlock();
+    }
 }
 
 /**
@@ -382,10 +400,12 @@ export async function browseOffers(trainNo: string, journeyDate: string): Promis
  * 4. Deduplicate by (deviceId, trainNo, currentSeatNo, journeyDate)
  */
 export async function mergeRemoteSwaps(remoteSwaps: LocalSwap[]): Promise<{ added: number; updated: number }> {
-    const swaps = await loadSwaps();
-    const deviceId = await getOrCreateDeviceId();
-    let added = 0;
-    let updated = 0;
+    const unlock = await storeMutex.lock();
+    try {
+        const swaps = await loadSwaps();
+        const deviceId = await getOrCreateDeviceId();
+        let added = 0;
+        let updated = 0;
 
     for (const remote of remoteSwaps) {
         // Security: validate incoming swap structure
@@ -417,12 +437,15 @@ export async function mergeRemoteSwaps(remoteSwaps: LocalSwap[]): Promise<{ adde
         }
     }
 
-    if (added > 0 || updated > 0) {
-        const capped = await enforceStorageCap(swaps);
-        await saveSwaps(capped);
-    }
+        if (added > 0 || updated > 0) {
+            const capped = await enforceStorageCap(swaps);
+            await saveSwaps(capped);
+        }
 
-    return { added, updated };
+        return { added, updated };
+    } finally {
+        unlock();
+    }
 }
 
 /**
@@ -434,12 +457,14 @@ export async function updateSwapStatus(
     newStatus: SwapStatus,
     metadata?: Record<string, any>
 ): Promise<LocalSwap | null> {
-    const swaps = await loadSwaps();
-    const idx = swaps.findIndex(s => s.id === swapId);
-    if (idx === -1) return null;
+    const unlock = await storeMutex.lock();
+    try {
+        const swaps = await loadSwaps();
+        const idx = swaps.findIndex(s => s.id === swapId);
+        if (idx === -1) return null;
 
-    const swap = swaps[idx];
-    const validTransitions: Record<SwapStatus, SwapStatus[]> = {
+        const swap = swaps[idx];
+        const validTransitions: Record<SwapStatus, SwapStatus[]> = {
         OPEN: ['MATCHED', 'CANCELLED', 'EXPIRED', 'WITHDRAWN'],
         MATCHED: ['ACCEPTED', 'CANCELLED', 'EXPIRED', 'WITHDRAWN'],
         ACCEPTED: ['COMPLETED', 'CANCELLED'],
@@ -453,28 +478,33 @@ export async function updateSwapStatus(
         return null; // Invalid transition
     }
 
-    swap.status = newStatus;
-    swap.updatedAt = Date.now();
-    swaps[idx] = swap;
-    await saveSwaps(swaps);
+        swap.status = newStatus;
+        swap.updatedAt = Date.now();
+        swaps[idx] = swap;
+        await saveSwaps(swaps);
 
-    const deviceId = await getOrCreateDeviceId();
-    await logSwapEvent(swapId, newStatus as SwapEvent['eventType'], deviceId, metadata);
+        const deviceId = await getOrCreateDeviceId();
+        await logSwapEvent(swapId, newStatus as SwapEvent['eventType'], deviceId, metadata);
 
-    return swap;
+        return swap;
+    } finally {
+        unlock();
+    }
 }
 
 /**
  * Accept a match — update both swaps and the session.
  */
 export async function acceptMatch(swapId: string, matchedSwapId: string): Promise<boolean> {
-    const swaps = await loadSwaps();
-    const deviceId = await getOrCreateDeviceId();
+    const unlock = await storeMutex.lock();
+    try {
+        const swaps = await loadSwaps();
+        const deviceId = await getOrCreateDeviceId();
 
-    const mySwap = swaps.find(s => s.id === swapId && s.deviceId === deviceId);
-    const theirSwap = swaps.find(s => s.id === matchedSwapId);
+        const mySwap = swaps.find(s => s.id === swapId && s.deviceId === deviceId);
+        const theirSwap = swaps.find(s => s.id === matchedSwapId);
 
-    if (!mySwap || !theirSwap) return false;
+        if (!mySwap || !theirSwap) return false;
 
     // Create or update session
     const session: SwapSession = {
@@ -488,29 +518,32 @@ export async function acceptMatch(swapId: string, matchedSwapId: string): Promis
         completedAt: null,
     };
 
-    mySwap.status = 'ACCEPTED';
-    mySwap.matchedWith = matchedSwapId;
-    mySwap.sessionId = session.id;
-    mySwap.updatedAt = Date.now();
+        mySwap.status = 'ACCEPTED';
+        mySwap.matchedWith = matchedSwapId;
+        mySwap.sessionId = session.id;
+        mySwap.updatedAt = Date.now();
 
-    // Mark theirs as matched (they'll need to accept too via mesh)
-    theirSwap.status = 'MATCHED';
-    theirSwap.matchedWith = swapId;
-    theirSwap.sessionId = session.id;
-    theirSwap.updatedAt = Date.now();
+        // Mark theirs as matched (they'll need to accept too via mesh)
+        theirSwap.status = 'MATCHED';
+        theirSwap.matchedWith = swapId;
+        theirSwap.sessionId = session.id;
+        theirSwap.updatedAt = Date.now();
 
-    await saveSwaps(swaps);
+        await saveSwaps(swaps);
 
-    const sessions = await loadSessions();
-    sessions.push(session);
-    await saveSessions(sessions);
+        const sessions = await loadSessions();
+        sessions.push(session);
+        await saveSessions(sessions);
 
-    await logSwapEvent(swapId, 'ACCEPTED', deviceId, {
-        matchedWith: matchedSwapId,
-        sessionId: session.id,
-    });
+        await logSwapEvent(swapId, 'ACCEPTED', deviceId, {
+            matchedWith: matchedSwapId,
+            sessionId: session.id,
+        });
 
-    return true;
+        return true;
+    } finally {
+        unlock();
+    }
 }
 
 /**
@@ -551,10 +584,12 @@ export async function logSwapEvent(
  * Clean up expired swaps. Runs automatically before reads.
  */
 export async function pruneExpired(): Promise<number> {
-    const swaps = await loadSwaps();
-    const now = Date.now();
-    let pruned = 0;
-    const deviceId = await getOrCreateDeviceId();
+    const unlock = await storeMutex.lock();
+    try {
+        const swaps = await loadSwaps();
+        const now = Date.now();
+        let pruned = 0;
+        const deviceId = await getOrCreateDeviceId();
 
     for (const swap of swaps) {
         if (swap.status === 'OPEN' && swap.expiresAt < now) {
@@ -565,11 +600,14 @@ export async function pruneExpired(): Promise<number> {
         }
     }
 
-    if (pruned > 0) {
-        await saveSwaps(swaps);
-    }
+        if (pruned > 0) {
+            await saveSwaps(swaps);
+        }
 
-    return pruned;
+        return pruned;
+    } finally {
+        unlock();
+    }
 }
 
 /**

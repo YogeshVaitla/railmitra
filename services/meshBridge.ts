@@ -43,6 +43,8 @@ export interface IMeshBridge {
     broadcastSwapOffer(swap: LocalSwap): void;
     broadcastSwapAccept(swapId: string, matchedSwapId: string): void;
     broadcastSwapCancel(swapId: string): void;
+    broadcastSessionComplete(sessionId: string): void;
+    broadcastSessionFail(sessionId: string): void;
     onSwapReceived(callback: SwapReceivedCallback): void;
     onPeerCountChanged(callback: PeerCountCallback): void;
     getPeerCount(): number;
@@ -192,6 +194,16 @@ export class MockMeshBridge implements IMeshBridge {
         console.log('[MockMesh] Broadcasting swap cancel:', swapId);
     }
 
+    broadcastSessionComplete(sessionId: string): void {
+        if (!this.active) return;
+        console.log('[MockMesh] Broadcasting session complete:', sessionId);
+    }
+
+    broadcastSessionFail(sessionId: string): void {
+        if (!this.active) return;
+        console.log('[MockMesh] Broadcasting session fail:', sessionId);
+    }
+
     onSwapReceived(callback: SwapReceivedCallback): void {
         this.swapCallbacks.push(callback);
     }
@@ -273,10 +285,11 @@ export class CloudSyncBridge implements IMeshBridge {
     private swapCallbacks: SwapReceivedCallback[] = [];
     private peerCallbacks: PeerCountCallback[] = [];
     private peerCount = 0;
-    private knownServerIds = new Set<number>();
-    private serverSwapIdMap = new Map<string, number>(); // local swap id -> server swap id
-    private pollTimer: ReturnType<typeof setInterval> | null = null;
+    private knownServerIds = new Set<string>(); // Changed to string to resolve types properly
+    private serverSwapIdMap = new Map<string, string>(); // local swap id -> server swap id
+    private pollTimer: ReturnType<typeof setTimeout> | null = null;
     private serverReachable = false;
+    private isPolling = false;
 
     async startAdvertising(trainNo: string, journeyDate: string): Promise<void> {
         this.trainNo = trainNo;
@@ -295,20 +308,33 @@ export class CloudSyncBridge implements IMeshBridge {
     }
 
     private async startPolling(): Promise<void> {
-        // Fetch immediately and WAIT for the first poll to complete
-        // so that browseOffers() has data ready
-        await this.fetchOffersFromServer();
+        if (!this.active) return;
+        this.isPolling = true;
 
-        this.pollTimer = setInterval(() => {
-            if (!this.active) return;
-            this.fetchOffersFromServer();
-        }, POLL_INTERVAL_MS);
+        try {
+            await this.fetchOffersFromServer();
+            await this.flushOfflineQueue(); // Automatically retry missed actions
+        } catch (error) {
+            // Ignored, try again next tick
+        } finally {
+            this.isPolling = false;
+        }
+
+        if (this.active) {
+            this.pollTimer = setTimeout(() => this.startPolling(), POLL_INTERVAL_MS);
+        }
     }
 
     public async forcePoll(): Promise<void> {
         console.log('[CloudSync] Force polling triggered (e.g. network restored)');
-        if (this.active) {
-            await this.fetchOffersFromServer();
+        if (this.active && !this.isPolling) {
+            this.isPolling = true;
+            try {
+                await this.fetchOffersFromServer();
+                await this.flushOfflineQueue();
+            } finally {
+                this.isPolling = false;
+            }
         }
     }
 
@@ -344,6 +370,16 @@ export class CloudSyncBridge implements IMeshBridge {
                 if (!this.knownServerIds.has(offer.id)) {
                     this.knownServerIds.add(offer.id);
 
+                    const expiresAtMs = (offer.expiresAt && !isNaN(new Date(offer.expiresAt).getTime())) 
+                        ? new Date(offer.expiresAt).getTime() 
+                        : Date.now() + 6 * 60 * 60 * 1000; // Backup expiry
+                    const createdAtMs = (offer.createdAt && !isNaN(new Date(offer.createdAt).getTime()))
+                        ? new Date(offer.createdAt).getTime()
+                        : Date.now();
+                    const updatedAtMs = (offer.updatedAt && !isNaN(new Date(offer.updatedAt).getTime()))
+                        ? new Date(offer.updatedAt).getTime()
+                        : Date.now();
+
                     const localSwap: LocalSwap = {
                         id: `cloud_${offer.id}`,
                         deviceId: offer.userId,
@@ -358,9 +394,9 @@ export class CloudSyncBridge implements IMeshBridge {
                         priorityScore: offer.priorityScore || 0.3,
                         matchedWith: null,
                         sessionId: null,
-                        expiresAt: new Date(offer.expiresAt).getTime(),
-                        createdAt: new Date(offer.createdAt).getTime(),
-                        updatedAt: new Date(offer.updatedAt).getTime(),
+                        expiresAt: expiresAtMs,
+                        createdAt: createdAtMs,
+                        updatedAt: updatedAtMs,
                         isLocal: false,
                     };
 
@@ -446,6 +482,53 @@ export class CloudSyncBridge implements IMeshBridge {
         return null;
     }
 
+    // --- Offline Queuing for Action Endpoints ---
+    private async saveToOfflineQueue(action: { type: string, url: string, method: string, body?: any }): Promise<void> {
+        try {
+            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+            const existing = await AsyncStorage.getItem('@meshbridge_offline_queue');
+            const queue = existing ? JSON.parse(existing) : [];
+            queue.push({ ...action, id: Date.now().toString() });
+            await AsyncStorage.setItem('@meshbridge_offline_queue', JSON.stringify(queue));
+        } catch (e) {
+            console.error('[CloudSync] Failed to save to offline queue', e);
+        }
+    }
+
+    private async flushOfflineQueue(): Promise<void> {
+        try {
+            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+            const existing = await AsyncStorage.getItem('@meshbridge_offline_queue');
+            if (!existing) return;
+            
+            const queue = JSON.parse(existing);
+            if (queue.length === 0) return;
+
+            console.log(`[CloudSync] Flushing ${queue.length} items from offline queue...`);
+            const stillFailing = [];
+
+            for (const item of queue) {
+                try {
+                    const response = await fetchWithTimeout(item.url, {
+                        method: item.method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: item.body ? JSON.stringify(item.body) : undefined,
+                        timeout: 10000,
+                    });
+                    if (!response.ok && response.status >= 500) {
+                        stillFailing.push(item); // Only retry on server/network errors, not 400s
+                    }
+                } catch (err) {
+                    stillFailing.push(item);
+                }
+            }
+
+            await AsyncStorage.setItem('@meshbridge_offline_queue', JSON.stringify(stillFailing));
+        } catch (e) {
+             console.error('[CloudSync] Failed to flush offline queue', e);
+        }
+    }
+
     /**
      * Broadcast acceptance of a swap via the cloud API.
      *
@@ -469,23 +552,58 @@ export class CloudSyncBridge implements IMeshBridge {
             body.matchedSwapId = counterpartServerId;
         }
 
-        fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps/${primaryServerId}/accept`, {
+        const url = `${SYNC_SERVER_URL}/api/swaps/${primaryServerId}/accept`;
+
+        fetchWithTimeout(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             timeout: 30000, // Render cold start
             body: JSON.stringify(body),
-        }).catch(() => { });
+        }).catch(() => {
+            // Offline/Fail: Queue for later
+            console.warn(`[CloudSync] acceptMatch offline. Queuing: ${url}`);
+            this.saveToOfflineQueue({ type: 'ACCEPT_SWAP', url, method: 'POST', body });
+        });
     }
 
     broadcastSwapCancel(swapId: string): void {
         const serverId = this.resolveServerId(swapId);
         if (serverId) {
-            fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps/${serverId}/cancel`, {
+            const url = `${SYNC_SERVER_URL}/api/swaps/${serverId}/cancel`;
+            fetchWithTimeout(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 30000, // Render cold start
-            }).catch(() => { });
+            }).catch(() => {
+                // Offline/Fail: Queue for later
+                console.warn(`[CloudSync] cancelSwap offline. Queuing: ${url}`);
+                this.saveToOfflineQueue({ type: 'CANCEL_SWAP', url, method: 'POST' });
+            });
         }
+    }
+
+    broadcastSessionComplete(sessionId: string): void {
+        const url = `${SYNC_SERVER_URL}/api/sessions/${sessionId}/complete`;
+        fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000, 
+        }).catch(() => {
+            console.warn(`[CloudSync] sessionComplete offline. Queuing: ${url}`);
+            this.saveToOfflineQueue({ type: 'COMPLETE_SESSION', url, method: 'POST' });
+        });
+    }
+
+    broadcastSessionFail(sessionId: string): void {
+        const url = `${SYNC_SERVER_URL}/api/sessions/${sessionId}/fail`;
+        fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000, 
+        }).catch(() => {
+            console.warn(`[CloudSync] sessionFail offline. Queuing: ${url}`);
+            this.saveToOfflineQueue({ type: 'FAIL_SESSION', url, method: 'POST' });
+        });
     }
 
     onSwapReceived(callback: SwapReceivedCallback): void {
@@ -503,7 +621,7 @@ export class CloudSyncBridge implements IMeshBridge {
     stop(): void {
         this.active = false;
         if (this.pollTimer) {
-            clearInterval(this.pollTimer);
+            clearTimeout(this.pollTimer);
             this.pollTimer = null;
         }
         this.peerCount = 0;
@@ -615,6 +733,18 @@ export class HybridMeshBridge implements IMeshBridge {
         console.log(`[HybridMeshBridge] Broadcasting CANCEL for ${swapId}.`);
         this.nearbyBridge.broadcastSwapCancel(swapId);
         this.cloudBridge.broadcastSwapCancel(swapId);
+    }
+
+    broadcastSessionComplete(sessionId: string): void {
+        console.log(`[HybridMeshBridge] Broadcasting SESSION_COMPLETE for ${sessionId}.`);
+        if (this.nearbyBridge.broadcastSessionComplete) this.nearbyBridge.broadcastSessionComplete(sessionId);
+        this.cloudBridge.broadcastSessionComplete(sessionId);
+    }
+
+    broadcastSessionFail(sessionId: string): void {
+        console.log(`[HybridMeshBridge] Broadcasting SESSION_FAIL for ${sessionId}.`);
+        if (this.nearbyBridge.broadcastSessionFail) this.nearbyBridge.broadcastSessionFail(sessionId);
+        this.cloudBridge.broadcastSessionFail(sessionId);
     }
 
     onSwapReceived(callback: SwapReceivedCallback): void {

@@ -553,6 +553,28 @@ export class NearbyMeshBridge implements IMeshBridge {
         NearbyConnections.sendPayload(payload).catch(() => { });
     }
 
+    broadcastSessionComplete(sessionId: string): void {
+        if (!NearbyConnections || !this.active) return;
+
+        const innerPayload = {
+            type: 'SESSION_COMPLETE',
+            sessionId,
+        };
+        const payload = this.wrapInGossipEnvelope(innerPayload);
+        NearbyConnections.sendPayload(payload).catch(() => { });
+    }
+
+    broadcastSessionFail(sessionId: string): void {
+        if (!NearbyConnections || !this.active) return;
+
+        const innerPayload = {
+            type: 'SESSION_FAIL',
+            sessionId,
+        };
+        const payload = this.wrapInGossipEnvelope(innerPayload);
+        NearbyConnections.sendPayload(payload).catch(() => { });
+    }
+
     onSwapReceived(callback: SwapReceivedCallback): void {
         this.swapCallbacks.push(callback);
     }

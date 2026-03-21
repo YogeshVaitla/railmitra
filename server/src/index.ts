@@ -537,15 +537,18 @@ app.post('/api/utilities/theft-risk', v2Stub);
 // ============================================================
 // RM-SW-011: Swap Expiry Cron Job — runs every 15 minutes
 // Finds OPEN swaps past their expiresAt and marks them EXPIRED.
+// Also finds PENDING sessions older than 2 hours and FAILS them.
 // ============================================================
 setInterval(async () => {
     try {
         const now = new Date();
-        const expired = await prisma.swapRequest.findMany({
+        
+        // 1. Expire stale OPEN swaps
+        const expiredSwaps = await prisma.swapRequest.findMany({
             where: { status: 'OPEN', expiresAt: { lt: now } },
         });
 
-        for (const swap of expired) {
+        for (const swap of expiredSwaps) {
             await prisma.swapRequest.update({
                 where: { id: swap.id },
                 data: { status: 'EXPIRED', updatedAt: now },
@@ -556,9 +559,50 @@ setInterval(async () => {
             broadcastSSE(swap.trainNo, swap.journeyDate, { type: 'OFFER_EXPIRED', swapId: swap.id });
         }
 
-        if (expired.length > 0) {
-            logger.info(`[Cron] Expired ${expired.length} stale swap offer(s)`);
+        if (expiredSwaps.length > 0) {
+            logger.info(`[Cron] Expired ${expiredSwaps.length} stale swap offer(s)`);
         }
+
+        // 2. Kill stale PENDING sessions (older than 2 hours)
+        const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+        const staleSessions = await prisma.swapSession.findMany({
+            where: { status: 'PENDING', createdAt: { lt: twoHoursAgo } },
+            include: { participants: true },
+        });
+
+        for (const session of staleSessions) {
+            // Revert all participants. If they are already past limits, expire them immediately.
+            for (const swap of session.participants) {
+                const revertStatus = (swap.expiresAt && swap.expiresAt < now) ? 'EXPIRED' : 'OPEN';
+                await prisma.swapRequest.update({
+                    where: { id: swap.id },
+                    data: { status: revertStatus, matchedWith: null, sessionId: null, updatedAt: now },
+                });
+                await prisma.swapEvent.create({
+                    data: {
+                        swapId: swap.id,
+                        eventType: revertStatus === 'EXPIRED' ? 'EXPIRED' : 'FAILED',
+                        actorId: 'SYSTEM_CRON',
+                        metadata: JSON.stringify({ sessionId: session.id, reason: 'Session Timeout' }),
+                    },
+                });
+            }
+
+            await prisma.swapSession.update({
+                where: { id: session.id },
+                data: { status: 'FAILED' },
+            });
+
+            const firstSwap = session.participants[0];
+            if (firstSwap) {
+                broadcastSSE(firstSwap.trainNo, firstSwap.journeyDate, { type: 'SESSION_FAILED', sessionId: session.id });
+            }
+        }
+
+        if (staleSessions.length > 0) {
+            logger.info(`[Cron] Reverted & failed ${staleSessions.length} stale pending session(s)`);
+        }
+
     } catch (err) {
         logger.error('[Cron] Swap expiry check failed:', { error: err });
     }

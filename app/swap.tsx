@@ -300,6 +300,9 @@ export default function SwapScreen() {
     const handleCompleteSwap = async () => {
         if (mySwapId) {
             await updateSwapStatus(mySwapId, 'COMPLETED');
+            if (activeSwapObj?.sessionId) {
+                meshRef.current?.broadcastSessionComplete(activeSwapObj.sessionId);
+            }
             Alert.alert('Success', 'Swap marked as completed! Have a great journey.');
             handleReset();
             router.push('/');
@@ -322,6 +325,9 @@ export default function SwapScreen() {
 
     const confirmReportProblem = async (swapId: string) => {
         await updateSwapStatus(swapId, 'CANCELLED');
+        if (activeSwapObj?.sessionId) {
+            meshRef.current?.broadcastSessionFail(activeSwapObj.sessionId);
+        }
         Alert.alert('Problem Reported', 'The swap has been cancelled. You can register a new one.');
         handleReset();
         await loadActiveSwap();
