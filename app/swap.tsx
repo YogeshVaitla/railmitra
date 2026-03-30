@@ -39,7 +39,6 @@ export default function SwapScreen() {
     // --- Mesh State ---
     const meshRef = useRef<IMeshBridge | null>(null);
     const [peerCount, setPeerCount] = useState(0);
-    const [meshActive, setMeshActive] = useState(false);
     const [isOnline, setIsOnline] = useState(true);
 
     // --- Browse State ---
@@ -152,6 +151,10 @@ export default function SwapScreen() {
         }
     };
 
+    // Ref to avoid stale closures in mesh callbacks
+    const trainNoRef = useRef(trainNo);
+    useEffect(() => { trainNoRef.current = trainNo; }, [trainNo]);
+
     // Auto-fetch swaps when trainNo is successfully submitted
     useEffect(() => {
         if (trainNo.length >= 4 && activeTab === 'browse' && !hasBrowsed && !browseLoading) {
@@ -166,10 +169,13 @@ export default function SwapScreen() {
             meshRef.current = mesh;
             mesh.onPeerCountChanged((count) => {
                 setPeerCount(count);
-                setMeshActive(count > 0);
             });
             mesh.onSwapReceived((newSwaps) => {
-                browseOffers(trainNo, journeyDate).then(setOffers);
+                // Use ref to get current trainNo, not the stale closure value
+                const currentTrainNo = trainNoRef.current;
+                if (currentTrainNo) {
+                    browseOffers(currentTrainNo, journeyDate).then(setOffers);
+                }
                 handleFindMatches();
                 if (newSwaps.length > 0) {
                     setHasNewMatch(true);
@@ -187,6 +193,17 @@ export default function SwapScreen() {
         setHasBrowsed(false);
 
         await initMeshBridge();
+
+        // Force an immediate cloud poll to get the latest offers from server
+        // This is especially important when the bridge was already active
+        // and the last poll was up to 15 seconds ago
+        if (meshRef.current) {
+            try {
+                await meshRef.current.forcePoll();
+            } catch {
+                // Ignore — offline is fine, we'll fall back to local data
+            }
+        }
 
         const result = await browseOffers(trainNo, journeyDate);
         setOffers(result);

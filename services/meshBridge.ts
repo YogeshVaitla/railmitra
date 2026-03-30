@@ -51,6 +51,7 @@ export interface IMeshBridge {
     getConnectedPeers(): MeshPeer[];
     isActive(): boolean;
     stop(): void;
+    forcePoll(): Promise<void>;
 }
 
 // --- Mock Implementation for Development ---
@@ -233,6 +234,10 @@ export class MockMeshBridge implements IMeshBridge {
         this.swapCallbacks = [];
         this.peerCallbacks = [];
     }
+
+    async forcePoll(): Promise<void> {
+        // Mock bridge doesn't poll a server — no-op
+    }
 }
 
 // --- Cloud Sync Implementation (Beta Testing) ---
@@ -285,7 +290,6 @@ export class CloudSyncBridge implements IMeshBridge {
     private swapCallbacks: SwapReceivedCallback[] = [];
     private peerCallbacks: PeerCountCallback[] = [];
     private peerCount = 0;
-    private knownServerIds = new Set<string>(); // Changed to string to resolve types properly
     private serverSwapIdMap = new Map<string, string>(); // local swap id -> server swap id
     private pollTimer: ReturnType<typeof setTimeout> | null = null;
     private serverReachable = false;
@@ -314,7 +318,7 @@ export class CloudSyncBridge implements IMeshBridge {
         try {
             await this.fetchOffersFromServer();
             await this.flushOfflineQueue(); // Automatically retry missed actions
-        } catch (error) {
+        } catch {
             // Ignored, try again next tick
         } finally {
             this.isPolling = false;
@@ -360,65 +364,62 @@ export class CloudSyncBridge implements IMeshBridge {
 
             // Count unique users (excluding self) as "peers"
             const uniqueUsers = new Set<string>();
-            const newSwaps: LocalSwap[] = [];
+            const allSwaps: LocalSwap[] = [];
 
             for (const offer of serverOffers) {
                 if (offer.userId === this.deviceId) continue; // Skip our own offers
                 uniqueUsers.add(offer.userId);
 
-                // Only process offers we haven't seen before
-                if (!this.knownServerIds.has(offer.id)) {
-                    this.knownServerIds.add(offer.id);
+                const expiresAtMs = (offer.expiresAt && !isNaN(new Date(offer.expiresAt).getTime())) 
+                    ? new Date(offer.expiresAt).getTime() 
+                    : Date.now() + 6 * 60 * 60 * 1000; // Backup expiry
+                const createdAtMs = (offer.createdAt && !isNaN(new Date(offer.createdAt).getTime()))
+                    ? new Date(offer.createdAt).getTime()
+                    : Date.now();
+                const updatedAtMs = (offer.updatedAt && !isNaN(new Date(offer.updatedAt).getTime()))
+                    ? new Date(offer.updatedAt).getTime()
+                    : Date.now();
 
-                    const expiresAtMs = (offer.expiresAt && !isNaN(new Date(offer.expiresAt).getTime())) 
-                        ? new Date(offer.expiresAt).getTime() 
-                        : Date.now() + 6 * 60 * 60 * 1000; // Backup expiry
-                    const createdAtMs = (offer.createdAt && !isNaN(new Date(offer.createdAt).getTime()))
-                        ? new Date(offer.createdAt).getTime()
-                        : Date.now();
-                    const updatedAtMs = (offer.updatedAt && !isNaN(new Date(offer.updatedAt).getTime()))
-                        ? new Date(offer.updatedAt).getTime()
-                        : Date.now();
+                const localSwap: LocalSwap = {
+                    id: `cloud_${offer.id}`,
+                    deviceId: offer.userId,
+                    trainNo: offer.trainNo,
+                    journeyDate: offer.journeyDate,
+                    currentCoachId: offer.currentCoachId,
+                    currentSeatNo: offer.currentSeatNo,
+                    currentSeatType: offer.currentSeatType as any,
+                    desiredSeatType: offer.desiredSeatType as any,
+                    status: offer.status === 'OPEN' ? 'OPEN' : 'MATCHED',
+                    reason: offer.reason || 'preference',
+                    priorityScore: offer.priorityScore || 0.3,
+                    matchedWith: null,
+                    sessionId: null,
+                    expiresAt: expiresAtMs,
+                    createdAt: createdAtMs,
+                    updatedAt: updatedAtMs,
+                    isLocal: false,
+                };
 
-                    const localSwap: LocalSwap = {
-                        id: `cloud_${offer.id}`,
-                        deviceId: offer.userId,
-                        trainNo: offer.trainNo,
-                        journeyDate: offer.journeyDate,
-                        currentCoachId: offer.currentCoachId,
-                        currentSeatNo: offer.currentSeatNo,
-                        currentSeatType: offer.currentSeatType as any,
-                        desiredSeatType: offer.desiredSeatType as any,
-                        status: offer.status === 'OPEN' ? 'OPEN' : 'MATCHED',
-                        reason: offer.reason || 'preference',
-                        priorityScore: offer.priorityScore || 0.3,
-                        matchedWith: null,
-                        sessionId: null,
-                        expiresAt: expiresAtMs,
-                        createdAt: createdAtMs,
-                        updatedAt: updatedAtMs,
-                        isLocal: false,
-                    };
-
-                    newSwaps.push(localSwap);
-                }
+                allSwaps.push(localSwap);
             }
 
-            // Update peer count
+            // Update peer count — always reflect latest server state
             const newPeerCount = uniqueUsers.size;
             if (newPeerCount !== this.peerCount) {
                 this.peerCount = newPeerCount;
                 this.peerCallbacks.forEach(cb => cb(this.peerCount));
             }
 
-            // Merge new offers into local store and notify
-            if (newSwaps.length > 0) {
-                const { added } = await mergeRemoteSwaps(newSwaps);
+            // Merge ALL server offers into local store
+            // mergeRemoteSwaps() handles deduplication by (deviceId, trainNo, coachId, seatNo, journeyDate)
+            // This ensures offers deleted locally (e.g. by clearMockSwapData) get re-synced
+            if (allSwaps.length > 0) {
+                const { added } = await mergeRemoteSwaps(allSwaps);
                 if (added > 0) {
-                    this.swapCallbacks.forEach(cb => cb(newSwaps));
+                    this.swapCallbacks.forEach(cb => cb(allSwaps));
                 }
             }
-        } catch (error) {
+        } catch {
             // Server unreachable — that's fine, we're offline-first
             this.serverReachable = false;
             console.log('[CloudSync] Server not reachable, running in local-only mode');
@@ -518,7 +519,7 @@ export class CloudSyncBridge implements IMeshBridge {
                     if (!response.ok && response.status >= 500) {
                         stillFailing.push(item); // Only retry on server/network errors, not 400s
                     }
-                } catch (err) {
+                } catch {
                     stillFailing.push(item);
                 }
             }
@@ -627,7 +628,6 @@ export class CloudSyncBridge implements IMeshBridge {
         this.peerCount = 0;
         this.swapCallbacks = [];
         this.peerCallbacks = [];
-        this.knownServerIds.clear();
         this.serverSwapIdMap.clear();
     }
 }
@@ -783,6 +783,10 @@ export class HybridMeshBridge implements IMeshBridge {
             this.netInfoUnsubscribe = null;
         }
         console.log('[HybridMeshBridge] All mesh bridging stopped and listeners removed.');
+    }
+
+    async forcePoll(): Promise<void> {
+        await this.cloudBridge.forcePoll();
     }
 }
 

@@ -321,12 +321,10 @@ export class NearbyMeshBridge implements IMeshBridge {
 
                     // RM-SW-022: Unwrap gossip envelope if present
                     let data = rawData;
-                    let isGossip = false;
-                    let originEndpointId = event.endpointId;
+                    const originEndpointId = event.endpointId;
 
                     if (rawData.ttl !== undefined && rawData.senderId && rawData.payload) {
                         // This is a gossip-wrapped payload
-                        isGossip = true;
                         const msgHash = `${rawData.senderId}_${rawData.timestamp}`;
 
                         // Check if we've already seen this message
@@ -629,5 +627,9 @@ export class NearbyMeshBridge implements IMeshBridge {
 
     stop(): void {
         this.stopInternal(true);
+    }
+
+    async forcePoll(): Promise<void> {
+        // P2P bridge doesn't poll a server — no-op
     }
 }

@@ -697,14 +697,21 @@ export async function clearAllSwapData(): Promise<void> {
 
 /**
  * Remove any swap offers that were injected by the mock mesh bridge.
- * Keeps only swaps created locally by this device.
+ * Only removes swaps from the MockMeshBridge simulation (deviceId 'peer_*'/'mock_peer_*').
+ * Preserves legitimate remote swaps from cloud sync and real P2P connections.
  * Call this on app startup when switching from dev to production mode.
  */
 export async function clearMockSwapData(): Promise<void> {
     const swaps = await loadSwaps();
-    const localOnly = swaps.filter(s => s.isLocal === true);
-    if (localOnly.length < swaps.length) {
-        console.log(`[SwapStore] Cleared ${swaps.length - localOnly.length} mock swap(s), kept ${localOnly.length} local`);
-        await saveSwaps(localOnly);
+    // Only remove mock-simulated swaps, NOT real cloud/P2P synced data
+    const isMockSwap = (s: LocalSwap): boolean => {
+        return (s.deviceId.startsWith('peer_') || s.deviceId.startsWith('mock_peer_'))
+            && s.isLocal === false;
+    };
+    const kept = swaps.filter(s => !isMockSwap(s));
+    const removedCount = swaps.length - kept.length;
+    if (removedCount > 0) {
+        console.log(`[SwapStore] Cleared ${removedCount} mock swap(s), kept ${kept.length} (including remote synced)`);
+        await saveSwaps(kept);
     }
 }
