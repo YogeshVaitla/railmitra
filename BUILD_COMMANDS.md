@@ -19,7 +19,7 @@
 | 6 | `$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"` | Set Java path (PowerShell) |
 | 7 | `cd android; .\gradlew.bat assembleRelease` | Build release APK for testing |
 | 8 | `.\gradlew.bat assembleDebug` | Build debug APK (with dev tools) |
-| 9 | `.\gradlew.bat clean` | Clean previous build artifacts |
+| 9 | `.\gradlew.bat clean` | Clean artifacts. **WARNING**: Will break Expo native code! Use `npx expo prebuild --clean` instead. |
 | 10 | `.\gradlew.bat bundleRelease` | Build AAB for Play Store upload |
 
 **APK output:** `android\app\build\outputs\apk\release\app-release.apk`
@@ -51,11 +51,14 @@ npm install
 # 3. Generate native project
 npx expo prebuild --platform android --clean
 
-# 4. Set environment & build
-$env:ANDROID_HOME = "C:\Users\Yogesh\AppData\Local\Android\Sdk"
-$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
-cd android
-.\gradlew.bat assembleRelease
+# 4. Set Environment Variables & Build APK
+$env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
 
-# 5. APK is at: android\app\build\outputs\apk\release\app-release.apk
+cd android
+.\gradlew assembleRelease -x lintVitalAnalyzeRelease
+
+# 5. Print the compiled APK path
+if ($?) { Write-Host "`n✅ Build Successful! APK Location: $((Get-Item -Path '.\app\build\outputs\apk\release\app-release.apk').FullName)`n" -ForegroundColor Green }
 ```
