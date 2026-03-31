@@ -65,8 +65,10 @@ export default function SwapScreen() {
     // --- Analytics State ---
     const [analytics, setAnalytics] = useState<SwapAnalytics | null>(null);
 
-    // --- Notification ---
+    // --- Notification State ---
     const [notification, setNotification] = useState<string | null>(null);
+    const didIAcceptRef = useRef(false);
+    const prevStatusRef = useRef<string | null>(null);
 
     const isFormValid = trainNo.length >= 4 && coachId && seatNo && currentType && desiredType && currentType !== desiredType;
 
@@ -139,6 +141,36 @@ export default function SwapScreen() {
     useEffect(() => {
         if (deviceId) loadActiveSwap();
     }, [deviceId, hasNewMatch]);
+
+    // Show popup if the other person accepted
+    useEffect(() => {
+        if (activeSwapObj) {
+            if (prevStatusRef.current === 'OPEN' && (activeSwapObj.status === 'ACCEPTED' || activeSwapObj.status === 'MATCHED')) {
+                if (!didIAcceptRef.current) {
+                    Alert.alert(
+                        "Swap Accepted! 🎉",
+                        "Another passenger has accepted your swap offer! Do you confirm this swap?",
+                        [
+                            { 
+                                text: 'Cancel Swap', 
+                                style: 'cancel',
+                                onPress: () => confirmReportProblem(activeSwapObj.id) 
+                            },
+                            { 
+                                text: 'Confirm', 
+                                style: 'default',
+                                onPress: () => showNotification("Swap confirmed! Find your partner.") 
+                            }
+                        ]
+                    );
+                }
+            }
+            prevStatusRef.current = activeSwapObj.status;
+        } else {
+            prevStatusRef.current = null;
+            didIAcceptRef.current = false; // reset when swap completes/cancels
+        }
+    }, [activeSwapObj]);
 
     // --- Handlers ---
     const handleSetTrain = () => {
@@ -279,6 +311,7 @@ export default function SwapScreen() {
                 {
                     text: 'Accept Swap',
                     onPress: async () => {
+                        didIAcceptRef.current = true;
                         console.log(`[SwapScreen] Accepting swap myId=${myParticipant.swapId}, otherId=${otherParticipant.swapId}`);
                         await acceptMatch(myParticipant.swapId, otherParticipant.swapId);
                         meshRef.current?.broadcastSwapAccept(otherParticipant.swapId, myParticipant.swapId);
@@ -451,17 +484,25 @@ export default function SwapScreen() {
                         { key: 'browse' as TabType, label: 'Browse', icon: 'search-outline' },
                         { key: 'register' as TabType, label: 'Register', icon: 'add-circle-outline' },
                         { key: 'myswap' as TabType, label: 'My Swap', icon: 'swap-horizontal-outline' },
-                    ].map(tab => (
-                        <TouchableOpacity key={tab.key} style={[styles.tab, activeTab === tab.key && styles.tabActive]} onPress={() => switchTab(tab.key)}>
-                            <View style={{ position: 'relative' }}>
-                                <Ionicons name={tab.icon as any} size={18} color={activeTab === tab.key ? Colors.primary.start : Colors.text.tertiary} />
-                                {tab.key === 'myswap' && (hasNewMatch || submitted) && (
-                                    <View style={[styles.tabBadge, hasNewMatch ? { backgroundColor: Colors.danger.start } : { backgroundColor: Colors.success.start }]} />
-                                )}
-                            </View>
-                            <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>{tab.label}</Text>
-                        </TouchableOpacity>
-                    ))}
+                    ].map(tab => {
+                        const isDisabled = tab.key !== 'browse' && trainNo.length < 4;
+                        return (
+                            <TouchableOpacity 
+                                key={tab.key} 
+                                style={[styles.tab, activeTab === tab.key && styles.tabActive, isDisabled && { opacity: 0.5 }]} 
+                                disabled={isDisabled}
+                                onPress={() => switchTab(tab.key)}
+                            >
+                                <View style={{ position: 'relative' }}>
+                                    <Ionicons name={tab.icon as any} size={18} color={activeTab === tab.key ? Colors.primary.start : Colors.text.tertiary} />
+                                    {tab.key === 'myswap' && (hasNewMatch || submitted) && (
+                                        <View style={[styles.tabBadge, hasNewMatch ? { backgroundColor: Colors.danger.start } : { backgroundColor: Colors.success.start }]} />
+                                    )}
+                                </View>
+                                <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive, isDisabled && { color: Colors.text.tertiary }]}>{tab.label}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
                 </View>
 
                 {activeTab === 'browse' && (

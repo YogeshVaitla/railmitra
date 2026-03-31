@@ -493,8 +493,11 @@ app.get('/api/swaps/:trainNo/:journeyDate/analytics', async (req, res) => {
         for (const swap of allSwaps) {
             if (swap.status === 'OPEN') active++;
             if (swap.status === 'COMPLETED') completed++;
-            if (heatmap[swap.desiredSeatType]) heatmap[swap.desiredSeatType].wanted++;
-            if (heatmap[swap.currentSeatType]) heatmap[swap.currentSeatType].offered++;
+            
+            if (swap.status !== 'CANCELLED' && swap.status !== 'EXPIRED' && swap.status !== 'WITHDRAWN') {
+                if (heatmap[swap.desiredSeatType]) heatmap[swap.desiredSeatType].wanted++;
+                if (heatmap[swap.currentSeatType]) heatmap[swap.currentSeatType].offered++;
+            }
         }
 
         res.json({

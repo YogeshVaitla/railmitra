@@ -636,8 +636,10 @@ export async function getSwapAnalytics(trainNo: string, journeyDate: string): Pr
         if (swap.status === 'OPEN') activeOffers++;
         if (swap.status === 'COMPLETED') completedSwaps++;
 
-        if (heatmap[swap.desiredSeatType]) heatmap[swap.desiredSeatType].wanted++;
-        if (heatmap[swap.currentSeatType]) heatmap[swap.currentSeatType].offered++;
+        if (swap.status !== 'CANCELLED' && swap.status !== 'EXPIRED' && swap.status !== 'WITHDRAWN') {
+            if (heatmap[swap.desiredSeatType]) heatmap[swap.desiredSeatType].wanted++;
+            if (heatmap[swap.currentSeatType]) heatmap[swap.currentSeatType].offered++;
+        }
 
         // Calculate match time from events
         if (swap.status === 'MATCHED' || swap.status === 'ACCEPTED' || swap.status === 'COMPLETED') {
