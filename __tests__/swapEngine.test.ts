@@ -31,6 +31,8 @@ function makeSwap(overrides: Partial<LocalSwap> = {}): LocalSwap {
     status: 'OPEN', reason: 'preference', priorityScore: 0.25,
     matchedWith: null, sessionId: null,
     expiresAt: now + 6 * 3600000, createdAt: now, updatedAt: now, isLocal: true,
+    boardingStation: null,
+    destinationStation: null,
     ...overrides,
   };
 }

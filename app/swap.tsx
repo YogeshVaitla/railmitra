@@ -16,12 +16,14 @@ import {
     getSwapsForTrain, updateSwapStatus, LocalSwap, SeatType,
     SwapAnalytics, SwapReason,
 } from '../services/swapStore';
+import { registerJourneyGeofences, removeJourneyGeofences } from '../services/geofenceService';
 
 // Components
 import { MeshStatusBar } from '../components/swap/MeshStatusBar';
 import { BrowseTab } from '../components/swap/BrowseTab';
 import { RegisterTab } from '../components/swap/RegisterTab';
 import { MySwapTab } from '../components/swap/MySwapTab';
+import { Speedometer } from '../components/swap/Speedometer';
 
 type TabType = 'browse' | 'register' | 'myswap';
 
@@ -55,6 +57,9 @@ export default function SwapScreen() {
     const [loading, setLoading] = useState(false);
     const [submitted, setSubmitted] = useState(false);
     const [mySwapId, setMySwapId] = useState<string | null>(null);
+    // Chunk 1: Boarding / destination stations for geofence auto-wake
+    const [boardingStation, setBoardingStation] = useState<string | null>(null);
+    const [destinationStation, setDestinationStation] = useState<string | null>(null);
 
     // --- Matches State ---
     const [matches, setMatches] = useState<SwapMatch[]>([]);
@@ -261,6 +266,9 @@ export default function SwapScreen() {
                 currentSeatType: currentType,
                 desiredSeatType: desiredType,
                 reason,
+                // Chunk 1: persist station selection for geofencing
+                boardingStation: boardingStation ?? null,
+                destinationStation: destinationStation ?? null,
             });
 
             console.log(`[SwapScreen] Swap created locally, id=${swap.id}`);
@@ -275,6 +283,15 @@ export default function SwapScreen() {
 
             setActiveTab('myswap');
             showNotification('✅ Swap registered! Looking for matches...');
+
+            // Chunk 4: Register geofences if stations were selected
+            if (boardingStation && destinationStation) {
+                registerJourneyGeofences(trainNo, boardingStation, destinationStation)
+                    .then(ok => {
+                        if (ok) showNotification('📍 Auto-wake geofences set at your stations!');
+                    })
+                    .catch(err => console.warn('[SwapScreen] Geofence registration failed:', err));
+            }
 
             const updatedOffers = await browseOffers(trainNo, journeyDate);
             setOffers(updatedOffers);
@@ -340,6 +357,8 @@ export default function SwapScreen() {
                     meshRef.current?.broadcastSwapCancel(swapId);
                     AsyncStorage.removeItem('activeSwap');
                     showNotification('🚫 Swap offer cancelled.');
+                    // Chunk 4: Remove geofences when swap is cancelled
+                    removeJourneyGeofences().catch(() => { /* best-effort */ });
                     handleReset();
                     await loadActiveSwap();
                 },
@@ -393,6 +412,8 @@ export default function SwapScreen() {
         setCoachId(''); setSeatNo(''); setCurrentType(''); setDesiredType('');
         setReason('preference'); setMatches([]); setAcceptedIds([]);
         setAnalytics(null); setMySwapId(null); setActiveTab('browse');
+        // Chunk 1: Reset station selections too
+        setBoardingStation(null); setDestinationStation(null);
     };
 
     const switchTab = (tab: TabType) => {
@@ -516,21 +537,29 @@ export default function SwapScreen() {
                     <RegisterTab 
                         submitted={submitted} coachId={coachId} seatNo={seatNo} currentType={currentType}
                         desiredType={desiredType} reason={reason} loading={loading} isFormValid={!!isFormValid}
+                        boardingStation={boardingStation} destinationStation={destinationStation}
                         onCoachIdChange={setCoachId} onSeatNoChange={setSeatNo} onCurrentTypeChange={setCurrentType}
-                        onDesiredTypeChange={setDesiredType} onReasonChange={setReason} onSubmit={handleSubmit}
+                        onDesiredTypeChange={setDesiredType} onReasonChange={setReason}
+                        onBoardingStationChange={setBoardingStation}
+                        onDestinationStationChange={setDestinationStation}
+                        onSubmit={handleSubmit}
                         onGoToMySwap={() => setActiveTab('myswap')}
                     />
                 )}
                 {activeTab === 'myswap' && (
-                    <MySwapTab 
-                        submitted={submitted} mySwapId={mySwapId} activeSwapObj={activeSwapObj}
-                        matchedPartnerObj={matchedPartnerObj} isAccepted={!!isAccepted} peerCount={peerCount}
-                        matchLoading={matchLoading} matches={matches} acceptedIds={acceptedIds}
-                        onCancelSwap={handleCancelSwap} onFindMatches={handleFindMatches} onAcceptSwap={handleAcceptSwap}
-                        onGoToRegister={() => setActiveTab('register')}
-                        onCompleteSwap={handleCompleteSwap}
-                        onReportProblem={handleReportProblem}
-                    />
+                    <>
+                        {/* Chunk 2: Live Speedometer shown when swap is active */}
+                        {submitted && <Speedometer peerCount={peerCount} />}
+                        <MySwapTab 
+                            submitted={submitted} mySwapId={mySwapId} activeSwapObj={activeSwapObj}
+                            matchedPartnerObj={matchedPartnerObj} isAccepted={!!isAccepted} peerCount={peerCount}
+                            matchLoading={matchLoading} matches={matches} acceptedIds={acceptedIds}
+                            onCancelSwap={handleCancelSwap} onFindMatches={handleFindMatches} onAcceptSwap={handleAcceptSwap}
+                            onGoToRegister={() => setActiveTab('register')}
+                            onCompleteSwap={handleCompleteSwap}
+                            onReportProblem={handleReportProblem}
+                        />
+                    </>
                 )}
             </ScrollView>
         </View>

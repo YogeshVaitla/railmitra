@@ -152,6 +152,8 @@ export class MockMeshBridge implements IMeshBridge {
                 createdAt: now - Math.floor(Math.random() * 3600000), // Up to 1 hour ago
                 updatedAt: now,
                 isLocal: false,
+                boardingStation: null,
+                destinationStation: null,
             };
 
             // Merge into local store and notify
@@ -398,6 +400,8 @@ export class CloudSyncBridge implements IMeshBridge {
                     createdAt: createdAtMs,
                     updatedAt: updatedAtMs,
                     isLocal: false,
+                    boardingStation: offer.boardingStation ?? null,
+                    destinationStation: offer.destinationStation ?? null,
                 };
 
                 allSwaps.push(localSwap);

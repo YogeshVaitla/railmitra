@@ -91,6 +91,8 @@ describe('RM-SW-042 — Full Swap Lifecycle Integration', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       isLocal: false,
+      boardingStation: null,
+      destinationStation: null,
     };
 
     // ── STEP 4: MockMeshBridge delivers Swap B to Device A ─
@@ -180,6 +182,8 @@ describe('RM-SW-042 — Full Swap Lifecycle Integration', () => {
       matchedWith: null, sessionId: null,
       expiresAt: Date.now() + 3600000, createdAt: Date.now(), updatedAt: Date.now(),
       isLocal: false,
+      boardingStation: null,
+      destinationStation: null,
     };
 
     // Device C: has MIDDLE, wants UPPER
@@ -191,6 +195,8 @@ describe('RM-SW-042 — Full Swap Lifecycle Integration', () => {
       matchedWith: null, sessionId: null,
       expiresAt: Date.now() + 3600000, createdAt: Date.now(), updatedAt: Date.now(),
       isLocal: false,
+      boardingStation: null,
+      destinationStation: null,
     };
 
     // Mesh delivers B and C

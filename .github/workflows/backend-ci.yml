@@ -22,8 +22,6 @@ on:
     paths:
       - 'server/**'
 
-env:
-  NODE_VERSION: '20'
 
 jobs:
   # ---- Job 1: Lint & Type-check ----
@@ -39,7 +37,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: server/package-lock.json
 
@@ -86,7 +84,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: server/package-lock.json
 

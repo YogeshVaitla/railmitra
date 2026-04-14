@@ -51,6 +51,8 @@ function makeRemoteSwap(peerId: number, swapIdx: number, overrides: Partial<Loca
     createdAt: now - Math.floor(Math.random() * 3600000),
     updatedAt: now,
     isLocal: false,
+    boardingStation: null,
+    destinationStation: null,
     ...overrides,
   };
 }

@@ -29,8 +29,6 @@ on:
       - 'hooks/**'
       - 'constants/**'
 
-env:
-  NODE_VERSION: '20'
 
 jobs:
   # ---- Job 1: Lint & Type-check ----
@@ -43,7 +41,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -66,7 +64,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies

@@ -50,8 +50,8 @@ export type SwapReason = 'elderly' | 'medical' | 'family' | 'preference';
 export type SeatType = 'LOWER' | 'MIDDLE' | 'UPPER' | 'SIDE_LOWER' | 'SIDE_UPPER';
 
 export interface LocalSwap {
-    id: string;                  // UUID — unique across all devices
-    deviceId: string;            // Who created this (hashed fingerprint)
+    id: string;                      // UUID — unique across all devices
+    deviceId: string;                // Who created this (hashed fingerprint)
     trainNo: string;
     journeyDate: string;
     currentCoachId: string;
@@ -60,13 +60,15 @@ export interface LocalSwap {
     desiredSeatType: SeatType;
     status: SwapStatus;
     reason: SwapReason;
-    priorityScore: number;       // Computed on creation, decays over time
-    matchedWith: string | null;  // ID of matched swap
-    sessionId: string | null;    // Group ID for multi-party swaps
-    expiresAt: number;           // Unix timestamp — auto-expire after 6 hours
-    createdAt: number;           // Unix timestamp
-    updatedAt: number;           // Unix timestamp
-    isLocal: boolean;            // true = created on this device
+    priorityScore: number;           // Computed on creation, decays over time
+    matchedWith: string | null;      // ID of matched swap
+    sessionId: string | null;        // Group ID for multi-party swaps
+    expiresAt: number;               // Unix timestamp — auto-expire after 6 hours
+    createdAt: number;               // Unix timestamp
+    updatedAt: number;               // Unix timestamp
+    isLocal: boolean;                // true = created on this device
+    boardingStation: string | null;  // Station code where user boards (for geofencing)
+    destinationStation: string | null; // Station code where user exits (for geofencing)
 }
 
 export interface SwapEvent {
@@ -296,6 +298,8 @@ export async function createLocalSwap(params: {
     currentSeatType: SeatType;
     desiredSeatType: SeatType;
     reason: SwapReason;
+    boardingStation?: string | null;
+    destinationStation?: string | null;
 }): Promise<LocalSwap> {
     const unlock = await storeMutex.lock();
     try {
@@ -341,6 +345,8 @@ export async function createLocalSwap(params: {
         createdAt: now,
         updatedAt: now,
         isLocal: true,
+        boardingStation: params.boardingStation ?? null,
+        destinationStation: params.destinationStation ?? null,
     };
 
         swaps.push(swap);

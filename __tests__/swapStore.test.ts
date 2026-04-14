@@ -54,6 +54,8 @@ function makeRemote(overrides: Partial<LocalSwap> = {}): LocalSwap {
     matchedWith: null, sessionId: null,
     expiresAt: now + 3600000, createdAt: now, updatedAt: now,
     isLocal: false,
+    boardingStation: null,
+    destinationStation: null,
     ...overrides,
   };
 }
@@ -318,6 +320,8 @@ describe('SwapStore — Storage Cap Eviction', () => {
         createdAt: now - (200 - i) * 60000, // Older first
         updatedAt: now - (200 - i) * 60000,
         isLocal: false,
+        boardingStation: null,
+        destinationStation: null,
       });
     }
     await AsyncStorage.setItem('@seatseeker_swaps', JSON.stringify(existingSwaps));
