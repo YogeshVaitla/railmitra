@@ -159,7 +159,7 @@ const StationPicker: React.FC<StationPickerProps> = ({
                         );
                     }}
                     ListEmptyComponent={
-                        <Text style={pickerStyles.empty}>No stations match "{query}"</Text>
+                        <Text style={pickerStyles.empty}>No stations match &quot;{query}&quot;</Text>
                     }
                 />
             </View>
