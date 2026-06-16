@@ -315,7 +315,8 @@ function recomputePriority(swap: LocalSwap): number {
         preference: 0.05,
     };
 
-    const waitHours = Math.max(0, (Date.now() - swap.createdAt) / 3600000);
+    const createdTimestamp = new Date(swap.createdAt).getTime();
+    const waitHours = Math.max(0, (Date.now() - createdTimestamp) / 3600000);
     const waitBonus = Math.min(0.30, Math.log(1 + waitHours) * 0.17);
 
     return parseFloat((0.20 + (reasonBonus[swap.reason] || 0.05) + waitBonus).toFixed(3));

@@ -76,8 +76,8 @@ export async function calculateSeatConfidence(
         const trustScore = trustMap.get(report.deviceId) ?? 0.3; // Default low trust for unknown reporters
 
         // Apply time decay: Recent reports are worth more
-        const ageMinutes = (Date.now() - report.timestamp.getTime()) / (1000 * 60);
-        const timeFactor = Math.max(0.1, 1 - ageMinutes / 120); // Decays over 2 hours
+        const ageMinutes = Math.max(0, (Date.now() - report.timestamp.getTime()) / (1000 * 60));
+        const timeFactor = Math.max(0.1, Math.min(1.0, 1 - ageMinutes / 120)); // Decays over 2 hours, capped at 1.0
 
         // Apply verification method bonus
         const verificationBonus = getVerificationBonus(report.verificationMethod);

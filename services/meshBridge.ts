@@ -315,7 +315,13 @@ export class CloudSyncBridge implements IMeshBridge {
 
     private async startPolling(): Promise<void> {
         if (!this.active) return;
+        if (this.isPolling) return;
         this.isPolling = true;
+
+        if (this.pollTimer) {
+            clearTimeout(this.pollTimer);
+            this.pollTimer = null;
+        }
 
         try {
             await this.fetchOffersFromServer();
@@ -440,21 +446,23 @@ export class CloudSyncBridge implements IMeshBridge {
     }
 
     private async postOfferToServer(swap: LocalSwap): Promise<void> {
+        const url = `${SYNC_SERVER_URL}/api/swaps`;
+        const body = {
+            trainNo: swap.trainNo,
+            userId: this.deviceId,
+            currentCoachId: swap.currentCoachId,
+            currentSeatNo: swap.currentSeatNo,
+            currentSeatType: swap.currentSeatType,
+            desiredSeatType: swap.desiredSeatType,
+            journeyDate: swap.journeyDate,
+            reason: swap.reason,
+        };
         try {
-            const response = await fetchWithTimeout(`${SYNC_SERVER_URL}/api/swaps`, {
+            const response = await fetchWithTimeout(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 30000, // Render cold start
-                body: JSON.stringify({
-                    trainNo: swap.trainNo,
-                    userId: this.deviceId,
-                    currentCoachId: swap.currentCoachId,
-                    currentSeatNo: swap.currentSeatNo,
-                    currentSeatType: swap.currentSeatType,
-                    desiredSeatType: swap.desiredSeatType,
-                    journeyDate: swap.journeyDate,
-                    reason: swap.reason,
-                }),
+                body: JSON.stringify(body),
             });
 
             if (response.ok) {
@@ -466,9 +474,13 @@ export class CloudSyncBridge implements IMeshBridge {
             } else {
                 const errText = await response.text();
                 console.warn(`[CloudSync] postOffer failed: ${response.status} ${errText}`);
+                if (response.status >= 500) {
+                    this.saveToOfflineQueue({ type: 'CREATE_SWAP', url, method: 'POST', body, localId: swap.id });
+                }
             }
         } catch (error: any) {
             console.warn('[CloudSync] Could not sync offer (network error):', error.message);
+            this.saveToOfflineQueue({ type: 'CREATE_SWAP', url, method: 'POST', body, localId: swap.id });
         }
     }
 
@@ -488,7 +500,7 @@ export class CloudSyncBridge implements IMeshBridge {
     }
 
     // --- Offline Queuing for Action Endpoints ---
-    private async saveToOfflineQueue(action: { type: string, url: string, method: string, body?: any }): Promise<void> {
+    private async saveToOfflineQueue(action: { type: string, url: string, method: string, body?: any, localId?: string }): Promise<void> {
         try {
             const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
             const existing = await AsyncStorage.getItem('@meshbridge_offline_queue');
@@ -520,7 +532,18 @@ export class CloudSyncBridge implements IMeshBridge {
                         body: item.body ? JSON.stringify(item.body) : undefined,
                         timeout: 10000,
                     });
-                    if (!response.ok && response.status >= 500) {
+                    if (response.ok) {
+                        if (item.type === 'CREATE_SWAP' && item.localId) {
+                            try {
+                                const result = await response.json();
+                                if (result.swapId) {
+                                    this.serverSwapIdMap.set(item.localId, result.swapId);
+                                }
+                            } catch (e) {
+                                // Ignore JSON parse errors on success
+                            }
+                        }
+                    } else if (response.status >= 500) {
                         stillFailing.push(item); // Only retry on server/network errors, not 400s
                     }
                 } catch {

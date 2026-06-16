@@ -710,16 +710,21 @@ export async function clearAllSwapData(): Promise<void> {
  * Call this on app startup when switching from dev to production mode.
  */
 export async function clearMockSwapData(): Promise<void> {
-    const swaps = await loadSwaps();
-    // Only remove mock-simulated swaps, NOT real cloud/P2P synced data
-    const isMockSwap = (s: LocalSwap): boolean => {
-        return (s.deviceId.startsWith('peer_') || s.deviceId.startsWith('mock_peer_'))
-            && s.isLocal === false;
-    };
-    const kept = swaps.filter(s => !isMockSwap(s));
-    const removedCount = swaps.length - kept.length;
-    if (removedCount > 0) {
-        console.log(`[SwapStore] Cleared ${removedCount} mock swap(s), kept ${kept.length} (including remote synced)`);
-        await saveSwaps(kept);
+    const unlock = await storeMutex.lock();
+    try {
+        const swaps = await loadSwaps();
+        // Only remove mock-simulated swaps, NOT real cloud/P2P synced data
+        const isMockSwap = (s: LocalSwap): boolean => {
+            return (s.deviceId.startsWith('peer_') || s.deviceId.startsWith('mock_peer_'))
+                && s.isLocal === false;
+        };
+        const kept = swaps.filter(s => !isMockSwap(s));
+        const removedCount = swaps.length - kept.length;
+        if (removedCount > 0) {
+            console.log(`[SwapStore] Cleared ${removedCount} mock swap(s), kept ${kept.length} (including remote synced)`);
+            await saveSwaps(kept);
+        }
+    } finally {
+        unlock();
     }
 }

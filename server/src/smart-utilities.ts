@@ -188,9 +188,18 @@ export function detectTheftRisk(
     }
 
     // Calculate how long since power was disconnected
-    const timeSinceDisconnect = powerDisconnectedAt
-        ? currentTime - powerDisconnectedAt
-        : Infinity;
+    if (powerDisconnectedAt === null) {
+        // Power was never connected during this session — no theft risk
+        return {
+            riskDetected: false,
+            riskLevel: 'LOW',
+            triggerReason: 'Device not previously connected to power',
+            recommendedAction: 'None',
+            timestamp: currentTime,
+        };
+    }
+
+    const timeSinceDisconnect = currentTime - powerDisconnectedAt;
 
     // Grace period — user may have intentionally unplugged
     if (timeSinceDisconnect < POWER_DISCONNECT_GRACE_MS) {
