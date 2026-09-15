@@ -23,6 +23,12 @@ Updated 15 September 2026 for `pre-prod`. A checked item means implemented or lo
 - [x] Backend TypeScript/Prisma build and existing backend tests (40).
 - [x] Current-tree credential scan and generated-native consistency checks.
 
+## Verified by GitHub Actions
+
+- [x] Client lint, TypeScript, tests, credential scan and Android JavaScript export.
+- [x] PostgreSQL migrations/integration tests, backend build/tests and Docker image build.
+- [x] Clean Android release APK and AAB compilation plus final merged-manifest checks. Validation artifact: `android-validation-only` from run 34989664830.
+
 ## Required before deployment or Play submission
 
 - [ ] Rotate all database credentials exposed in Git history, update provider secrets and inspect access logs.
@@ -30,8 +36,8 @@ Updated 15 September 2026 for `pre-prod`. A checked item means implemented or lo
 - [ ] Publish the privacy text at a stable HTTPS URL and configure verified support email/build variables.
 - [ ] Configure a random server `ADMIN_TOKEN`; restrict moderation access and define report response ownership.
 - [ ] Review hosting/Google SDK logging and retention, then complete Data safety from the final binary.
-- [ ] Pass CI PostgreSQL integration, Docker and native Android builds, which were unavailable locally.
-- [ ] Build/sign the `.aab`, enable Play App Signing, protect the upload key and confirm `com.railmitra.app`.
+- [x] Pass CI PostgreSQL integration, Docker and native Android release builds.
+- [ ] Build the final production-signed `.aab` with production configuration, enable Play App Signing, protect the upload key and confirm `com.railmitra.app`.
 - [ ] Inspect the final manifest and AAB for API 36, 64-bit ABIs and 16 KB page compatibility.
 - [ ] Test an internal-track install, accessibility, screen sizes, text scaling, keyboard and edge-to-edge layout.
 - [ ] Run the physical test scenarios below on two and three phones, including real train conditions.
