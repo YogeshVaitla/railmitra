@@ -65,7 +65,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - run: npm ci --ignore-scripts
       - run: npx expo prebuild --platform android --no-install
       - run: node scripts/check-native.cjs
