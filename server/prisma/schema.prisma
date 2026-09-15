@@ -12,6 +12,37 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// V2 is isolated from unauthenticated legacy rows. Never migrate legacy identities.
+model ExchangeOffer {
+  id String @id
+  owner String
+  train String
+  date String
+  revision Int
+  state String
+  expires DateTime
+  created DateTime
+  record Json
+  @@index([train, date])
+  @@index([owner, expires])
+  @@index([created])
+}
+
+model ExchangeRevocation {
+  owner String @id
+  expires DateTime
+}
+
+model ExchangeReport {
+  id Int @id @default(autoincrement())
+  reporter String
+  target String
+  day String
+  created DateTime @default(now())
+  @@unique([reporter, target, day])
+  @@index([created])
+}
+
 // SeatMaster: This is our static list of all trains, coaches, and seats.
 // Basically the "blueprint" of every train we track.
 model SeatMaster {

@@ -1,109 +1,29 @@
-# =============================================================================
-# RailMitra Seat Swap V1 — Unified CI Pipeline
-# 
-# Triggers on PRs and pushes to main.
-# Runs linting, swap-critical tests, server type-checking, and Docker build
-# validation. If any swap test fails, the entire pipeline fails.
-# =============================================================================
-
-name: 🧪 Seat Swap CI
-
+name: Release checks
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
-
-
+    branches: [main, pre-prod, develop]
+  pull_request:
+    branches: [main, pre-prod]
+  workflow_call:
+permissions:
+  contents: read
 jobs:
-  # ---- Job 1: Lint the client app ----
-  lint:
-    name: 🔍 Lint (ESLint + TypeScript)
+  client:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run ESLint
-        run: npm run lint
-
-      - name: TypeScript type check (client)
-        run: npx tsc --noEmit
-
-  # ---- Job 2: Swap-Critical Tests (MUST PASS) ----
-  swap-tests:
-    name: 🧪 Swap Engine & Store Tests
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test -- --runInBand
+      - run: node scripts/check-secrets.cjs
+      - run: npx expo export --platform android --output-dir /tmp/railmitra-export
+  server:
     runs-on: ubuntu-latest
-    needs: lint
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      # The critical step — runs swapEngine.test.ts and swapStore.test.ts.
-      # Jest exits with code 1 on ANY failure, which fails the pipeline.
-      - name: Run swap tests (strict — pipeline fails on any failure)
-        run: npx jest --forceExit --detectOpenHandles --verbose __tests__/swapEngine.test.ts __tests__/swapStore.test.ts
-
-      - name: Collect test coverage
-        if: always()
-        run: npx jest --forceExit --detectOpenHandles --coverage __tests__/swapEngine.test.ts __tests__/swapStore.test.ts || true
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: swap-coverage
-          path: coverage/
-          retention-days: 7
-
-  # ---- Job 3: Server Type-Check ----
-  server-check:
-    name: 🔍 Server TypeScript Check
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install server dependencies
-        working-directory: server
-        run: npm ci
-
-      - name: Generate Prisma client
-        working-directory: server
-        run: npx prisma generate
-
-      - name: TypeScript type check (server)
-        working-directory: server
-        run: npx tsc --noEmit
-
-  # ---- Job 4: Server Tests ----
-  server-tests:
-    name: 🧪 Server Unit Tests
-    runs-on: ubuntu-latest
-    needs: server-check
-
     services:
       postgres:
         image: postgres:16-alpine
@@ -111,64 +31,51 @@ jobs:
           POSTGRES_USER: railmitra_test
           POSTGRES_PASSWORD: test_password
           POSTGRES_DB: railmitra_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://railmitra_test:test_password@localhost:5432/railmitra_test
       DIRECT_URL: postgresql://railmitra_test:test_password@localhost:5432/railmitra_test
-      NODE_ENV: test
-
+      TEST_DATABASE_URL: postgresql://railmitra_test:test_password@localhost:5432/railmitra_test
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '22'
+          cache: npm
           cache-dependency-path: server/package-lock.json
-
-      - name: Install server dependencies
+      - run: npm ci --ignore-scripts
         working-directory: server
-        run: npm ci
-
-      - name: Generate Prisma client
+      - run: npm run build
         working-directory: server
-        run: npx prisma generate
-
-      - name: Push schema to test DB
+      - run: npx prisma migrate deploy
         working-directory: server
-        run: npx prisma db push --skip-generate
-
-      - name: Run server tests
+      - run: npm test -- --runInBand
         working-directory: server
-        run: npx jest --forceExit --detectOpenHandles --verbose
-
-  # ---- Job 5: Docker Build Check (no deploy) ----
-  docker-build:
-    name: 🐳 Docker Build Validation
+      - run: docker build -t railmitra-api:check ./server
+  android:
     runs-on: ubuntu-latest
-    needs: [server-check]
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build Docker image (validation only — not pushed)
-        run: docker build -t railmitra-api:ci-check ./server
-
-      - name: Verify HEALTHCHECK instruction exists
-        run: docker inspect railmitra-api:ci-check --format='{{.Config.Healthcheck}}' | grep -q "wget"
-
-      - name: Check image size (target < 300MB)
-        run: |
-          SIZE=$(docker image inspect railmitra-api:ci-check --format='{{.Size}}')
-          SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "Docker image size: ${SIZE_MB}MB"
-          if [ "$SIZE_MB" -gt 300 ]; then
-            echo "::warning::Docker image is ${SIZE_MB}MB — target is under 300MB"
-          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: npm ci --ignore-scripts
+      - run: npx expo prebuild --platform android --no-install
+      - run: node scripts/check-native.cjs
+      - run: ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon
+        working-directory: android
+      - run: node scripts/check-native.cjs --merged
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-validation-only
+          path: |
+            android/app/build/outputs/bundle/release/*.aab
+            android/app/build/outputs/apk/release/*.apk
+          retention-days: 7

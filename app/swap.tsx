@@ -1,567 +1,158 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import NetInfo from '@react-native-community/netinfo';
+import React, { useCallback, useRef, useState } from 'react';
+import { Alert, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { BERTHS, Berth, calendarDate, CLASSES, compatible, exchangeState, Offer, TravelClass } from '../server/src/protocol';
+import { connect, ConnectionStatus, exchange, reportAndBlock } from '../services/exchange';
+import { Snapshot } from '../services/exchangeStore';
 
-import Colors from '../constants/Colors';
-import { styles } from '../components/swap/swap.styles';
-import { createMeshBridge, IMeshBridge } from '../services/meshBridge';
-import { findMyMatches, SwapMatch } from '../services/swapEngine';
-import {
-    acceptMatch, browseOffers, cancelSwap, clearMockSwapData,
-    createLocalSwap, getOrCreateDeviceId, getSwapAnalytics,
-    getSwapsForTrain, updateSwapStatus, LocalSwap, SeatType,
-    SwapAnalytics, SwapReason,
-} from '../services/swapStore';
-import { registerJourneyGeofences, removeJourneyGeofences } from '../services/geofenceService';
-
-// Components
-import { MeshStatusBar } from '../components/swap/MeshStatusBar';
-import { BrowseTab } from '../components/swap/BrowseTab';
-import { RegisterTab } from '../components/swap/RegisterTab';
-import { MySwapTab } from '../components/swap/MySwapTab';
-import { Speedometer } from '../components/swap/Speedometer';
-
-type TabType = 'browse' | 'register' | 'myswap';
-
+const labels = { OPEN:'Offer ready', WAITING:'Waiting for passenger confirmation', BOTH_ACCEPTED:'Both passengers accepted', COMPLETING:'Waiting for both completion confirmations', COMPLETED:'Exchange completed', FAILED:'Exchange cancelled or unavailable', EXPIRED:'Offer expired' };
+const indiaDate = () => new Date(Date.now()+330*60000).toISOString().slice(0,10);
 export default function SwapScreen() {
-    // --- Tab State ---
-    const [activeTab, setActiveTab] = useState<TabType>('browse');
-
-    // --- Core State ---
-    const [trainNo, setTrainNo] = useState('');
-    const [journeyDate] = useState(new Date().toISOString().split('T')[0]);
-    const [deviceId, setDeviceId] = useState('');
-    const [tempTrainNo, setTempTrainNo] = useState('');
-    const [isEditingTrain, setIsEditingTrain] = useState(true);
-
-    // --- Mesh State ---
-    const meshRef = useRef<IMeshBridge | null>(null);
-    const [peerCount, setPeerCount] = useState(0);
-    const [isOnline, setIsOnline] = useState(true);
-
-    // --- Browse State ---
-    const [offers, setOffers] = useState<LocalSwap[]>([]);
-    const [browseLoading, setBrowseLoading] = useState(false);
-    const [hasBrowsed, setHasBrowsed] = useState(false);
-
-    // --- Register Form State ---
-    const [coachId, setCoachId] = useState('');
-    const [seatNo, setSeatNo] = useState('');
-    const [currentType, setCurrentType] = useState<SeatType | ''>('');
-    const [desiredType, setDesiredType] = useState<SeatType | ''>('');
-    const [reason, setReason] = useState<SwapReason>('preference');
-    const [loading, setLoading] = useState(false);
-    const [submitted, setSubmitted] = useState(false);
-    const [mySwapId, setMySwapId] = useState<string | null>(null);
-    // Chunk 1: Boarding / destination stations for geofence auto-wake
-    const [boardingStation, setBoardingStation] = useState<string | null>(null);
-    const [destinationStation, setDestinationStation] = useState<string | null>(null);
-
-    // --- Matches State ---
-    const [matches, setMatches] = useState<SwapMatch[]>([]);
-    const [matchLoading, setMatchLoading] = useState(false);
-    const [acceptedIds, setAcceptedIds] = useState<string[]>([]);
-    const [hasNewMatch, setHasNewMatch] = useState(false);
-
-    // --- Analytics State ---
-    const [analytics, setAnalytics] = useState<SwapAnalytics | null>(null);
-
-    // --- Notification State ---
-    const [notification, setNotification] = useState<string | null>(null);
-    const didIAcceptRef = useRef(false);
-    const prevStatusRef = useRef<string | null>(null);
-
-    const isFormValid = trainNo.length >= 4 && coachId && seatNo && currentType && desiredType && currentType !== desiredType;
-
-    // --- Active Swap Data ---
-    const [activeSwapObj, setActiveSwapObj] = useState<LocalSwap | null>(null);
-    const [matchedPartnerObj, setMatchedPartnerObj] = useState<LocalSwap | null>(null);
-
-    const isAccepted = !!(activeSwapObj?.status === 'ACCEPTED' || activeSwapObj?.status === 'MATCHED');
-
-    const loadActiveSwap = async () => {
-        if (!deviceId) return;
-        const { getMySwaps, getSwapsForTrain } = require('../services/swapStore');
-        const mySwaps: LocalSwap[] = await getMySwaps();
-        const active = mySwaps.find(s => s.status !== 'CANCELLED' && s.status !== 'EXPIRED' && s.status !== 'WITHDRAWN' && s.status !== 'COMPLETED');
-
-        setActiveSwapObj(active || null);
-        if (active) {
-            setMySwapId(active.id);
-            setSubmitted(true);
-            setTrainNo(active.trainNo);
-            setCoachId(active.currentCoachId);
-            setSeatNo(active.currentSeatNo.toString());
-            setCurrentType(active.currentSeatType);
-            setDesiredType(active.desiredSeatType);
-            setReason(active.reason);
-
-            if ((active.status === 'ACCEPTED' || active.status === 'MATCHED') && active.matchedWith) {
-                const allSwaps: LocalSwap[] = await getSwapsForTrain(active.trainNo, active.journeyDate);
-                const partner = allSwaps.find((s: LocalSwap) => s.id === active.matchedWith);
-                setMatchedPartnerObj(partner || null);
-            } else {
-                setMatchedPartnerObj(null);
-            }
-        } else {
-            setMySwapId(null);
-            setSubmitted(false);
-            setMatchedPartnerObj(null);
-        }
-    };
-
-    // --- Init ---
-    useEffect(() => {
-        getOrCreateDeviceId().then(setDeviceId);
-        clearMockSwapData();
-
-        const unsubscribeNetInfo = NetInfo.addEventListener(state => {
-            setIsOnline(!!state.isConnected && !!state.isInternetReachable);
-        });
-
-        return () => {
-            meshRef.current?.stop();
-            unsubscribeNetInfo();
-        };
-    }, []);
-
-    // Sync tempTrainNo when trainNo restores from storage
-    useEffect(() => {
-        if (trainNo && !activeSwapObj) {
-            setTempTrainNo(trainNo);
-            setIsEditingTrain(false);
-        }
-    }, [trainNo]);
-    
-    // Auto collapse edit mode if we have a submitted active swap
-    useEffect(() => {
-        if (submitted) setIsEditingTrain(false);
-    }, [submitted]);
-
-    // Load active swap when device ID is set
-    useEffect(() => {
-        if (deviceId) loadActiveSwap();
-    }, [deviceId, hasNewMatch]);
-
-    // Show popup if the other person accepted
-    useEffect(() => {
-        if (activeSwapObj) {
-            if (prevStatusRef.current === 'OPEN' && (activeSwapObj.status === 'ACCEPTED' || activeSwapObj.status === 'MATCHED')) {
-                if (!didIAcceptRef.current) {
-                    Alert.alert(
-                        "Swap Accepted! 🎉",
-                        "Another passenger has accepted your swap offer! Do you confirm this swap?",
-                        [
-                            { 
-                                text: 'Cancel Swap', 
-                                style: 'cancel',
-                                onPress: () => confirmReportProblem(activeSwapObj.id) 
-                            },
-                            { 
-                                text: 'Confirm', 
-                                style: 'default',
-                                onPress: () => showNotification("Swap confirmed! Find your partner.") 
-                            }
-                        ]
-                    );
-                }
-            }
-            prevStatusRef.current = activeSwapObj.status;
-        } else {
-            prevStatusRef.current = null;
-            didIAcceptRef.current = false; // reset when swap completes/cancels
-        }
-    }, [activeSwapObj]);
-
-    // --- Handlers ---
-    const handleSetTrain = () => {
-        if (tempTrainNo.length >= 4) {
-            setTrainNo(tempTrainNo);
-            setIsEditingTrain(false);
-            setHasBrowsed(false);
-            setOffers([]);
-            setActiveTab('browse');
-        }
-    };
-
-    // Ref to avoid stale closures in mesh callbacks
-    const trainNoRef = useRef(trainNo);
-    useEffect(() => { trainNoRef.current = trainNo; }, [trainNo]);
-
-    // Auto-fetch swaps when trainNo is successfully submitted
-    useEffect(() => {
-        if (trainNo.length >= 4 && activeTab === 'browse' && !hasBrowsed && !browseLoading) {
-            handleBrowse();
-        }
-    }, [trainNo, activeTab, hasBrowsed, browseLoading]);
-
-    const initMeshBridge = async () => {
-        if (!trainNo || trainNo.length < 4) return;
-        if (!meshRef.current || !meshRef.current.isActive()) {
-            const mesh = createMeshBridge();
-            meshRef.current = mesh;
-            mesh.onPeerCountChanged((count) => {
-                setPeerCount(count);
-            });
-            mesh.onSwapReceived((newSwaps) => {
-                // Use ref to get current trainNo, not the stale closure value
-                const currentTrainNo = trainNoRef.current;
-                if (currentTrainNo) {
-                    browseOffers(currentTrainNo, journeyDate).then(setOffers);
-                }
-                handleFindMatches();
-                if (newSwaps.length > 0) {
-                    setHasNewMatch(true);
-                    showNotification(`📡 ${newSwaps.length} new offer${newSwaps.length > 1 ? 's' : ''} synced`);
-                }
-            });
-            await mesh.startAdvertising(trainNo, journeyDate);
-            await mesh.startDiscovery(trainNo, journeyDate);
-        }
-    };
-
-    const handleBrowse = async () => {
-        if (!trainNo || trainNo.length < 4) return;
-        setBrowseLoading(true);
-        setHasBrowsed(false);
-
-        await initMeshBridge();
-
-        // Force an immediate cloud poll to get the latest offers from server
-        // This is especially important when the bridge was already active
-        // and the last poll was up to 15 seconds ago
-        if (meshRef.current) {
-            try {
-                await meshRef.current.forcePoll();
-            } catch {
-                // Ignore — offline is fine, we'll fall back to local data
-            }
-        }
-
-        const result = await browseOffers(trainNo, journeyDate);
-        setOffers(result);
-        setHasBrowsed(true);
-        setBrowseLoading(false);
-
-        const stats = await getSwapAnalytics(trainNo, journeyDate);
-        setAnalytics(stats);
-    };
-
-    const handleSubmit = async () => {
-        if (!isFormValid || !currentType || !desiredType) return;
-        setLoading(true);
-
-        console.log(`[SwapScreen] Registering swap for train=${trainNo}, coach=${coachId}, seat=${seatNo}, currentType=${currentType}, desiredType=${desiredType}`);
-        await initMeshBridge();
-
-        try {
-            const swap = await createLocalSwap({
-                trainNo, journeyDate,
-                currentCoachId: coachId,
-                currentSeatNo: parseInt(seatNo),
-                currentSeatType: currentType,
-                desiredSeatType: desiredType,
-                reason,
-                // Chunk 1: persist station selection for geofencing
-                boardingStation: boardingStation ?? null,
-                destinationStation: destinationStation ?? null,
-            });
-
-            console.log(`[SwapScreen] Swap created locally, id=${swap.id}`);
-            meshRef.current?.broadcastSwapOffer(swap);
-            setMySwapId(swap.id);
-            setLoading(false);
-            setSubmitted(true);
-
-            AsyncStorage.setItem('activeSwap', JSON.stringify({
-                mySwapId: swap.id, trainNo, coachId, seatNo, currentType, desiredType,
-            }));
-
-            setActiveTab('myswap');
-            showNotification('✅ Swap registered! Looking for matches...');
-
-            // Chunk 4: Register geofences if stations were selected
-            if (boardingStation && destinationStation) {
-                registerJourneyGeofences(trainNo, boardingStation, destinationStation)
-                    .then(ok => {
-                        if (ok) showNotification('📍 Auto-wake geofences set at your stations!');
-                    })
-                    .catch(err => console.warn('[SwapScreen] Geofence registration failed:', err));
-            }
-
-            const updatedOffers = await browseOffers(trainNo, journeyDate);
-            setOffers(updatedOffers);
-            await loadActiveSwap();
-            const allSwaps = await getSwapsForTrain(trainNo, journeyDate);
-            const myMatches = findMyMatches(allSwaps, deviceId);
-            setMatches(myMatches);
-        } catch (error: any) {
-            console.error(`[SwapScreen] Register failed:`, error);
-            setLoading(false);
-            Alert.alert('Can\'t Register', error.message || 'Something went wrong.');
-        }
-    };
-
-    const handleFindMatches = async () => {
-        setMatchLoading(true);
-        const allSwaps = await getSwapsForTrain(trainNo, journeyDate);
-        const myMatches = findMyMatches(allSwaps, deviceId);
-        console.log(`[SwapScreen] Finding matches... found: ${myMatches.length}`);
-        setMatches(myMatches);
-        setMatchLoading(false);
-    };
-
-    const handleAcceptSwap = (match: SwapMatch) => {
-        const myParticipant = match.participants.find(p => p.isYou);
-        const otherParticipant = match.participants.find(p => !p.isYou);
-        if (!myParticipant || !otherParticipant) return;
-
-        Alert.alert(
-            'Accept This Swap?',
-            `You'll swap your seat with ${otherParticipant.coachId}/${otherParticipant.seatNo}`,
-            [
-                { text: 'Not Now', style: 'cancel' },
-                {
-                    text: 'Accept Swap',
-                    onPress: async () => {
-                        didIAcceptRef.current = true;
-                        console.log(`[SwapScreen] Accepting swap myId=${myParticipant.swapId}, otherId=${otherParticipant.swapId}`);
-                        await acceptMatch(myParticipant.swapId, otherParticipant.swapId);
-                        meshRef.current?.broadcastSwapAccept(otherParticipant.swapId, myParticipant.swapId);
-                        setAcceptedIds(prev => [...prev, match.id]);
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-                        await loadActiveSwap();
-                        
-                        const updatedOffers = await browseOffers(trainNo, journeyDate);
-                        setOffers(updatedOffers);
-                        handleFindMatches();
-                    },
-                },
-            ]
-        );
-    };
-
-    const handleCancelSwap = async (swapId: string) => {
-        Alert.alert('Cancel Swap', 'Are you sure you want to cancel your swap offer?', [
-            { text: 'Keep It', style: 'cancel' },
-            {
-                text: 'Cancel Offer', style: 'destructive',
-                onPress: async () => {
-                    console.log(`[SwapScreen] Cancelling swap id=${swapId}`);
-                    await cancelSwap(swapId);
-                    meshRef.current?.broadcastSwapCancel(swapId);
-                    AsyncStorage.removeItem('activeSwap');
-                    showNotification('🚫 Swap offer cancelled.');
-                    // Chunk 4: Remove geofences when swap is cancelled
-                    removeJourneyGeofences().catch(() => { /* best-effort */ });
-                    handleReset();
-                    await loadActiveSwap();
-                },
-            },
-        ]);
-    };
-
-    const handleCompleteSwap = async () => {
-        if (mySwapId) {
-            await updateSwapStatus(mySwapId, 'COMPLETED');
-            if (activeSwapObj?.sessionId) {
-                meshRef.current?.broadcastSessionComplete(activeSwapObj.sessionId);
-            }
-            Alert.alert('Success', 'Swap marked as completed! Have a great journey.');
-            handleReset();
-            router.push('/');
-        }
-    };
-
-    const handleReportProblem = async () => {
-        if (!mySwapId) return;
-        Alert.alert(
-            'Report a Problem',
-            'Why did this swap fail?',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Other person not there', onPress: () => confirmReportProblem(mySwapId) },
-                { text: 'Wrong seat', onPress: () => confirmReportProblem(mySwapId) },
-                { text: 'Changed mind', onPress: () => confirmReportProblem(mySwapId) }
-            ]
-        );
-    };
-
-    const confirmReportProblem = async (swapId: string) => {
-        await updateSwapStatus(swapId, 'CANCELLED');
-        if (activeSwapObj?.sessionId) {
-            meshRef.current?.broadcastSessionFail(activeSwapObj.sessionId);
-        }
-        Alert.alert('Problem Reported', 'The swap has been cancelled. You can register a new one.');
-        handleReset();
-        await loadActiveSwap();
-    };
-
-    const showNotification = (msg: string) => {
-        setNotification(msg);
-        setTimeout(() => setNotification(null), 5000);
-    };
-
-    const handleReset = () => {
-        setSubmitted(false); setHasBrowsed(false); setOffers([]);
-        setCoachId(''); setSeatNo(''); setCurrentType(''); setDesiredType('');
-        setReason('preference'); setMatches([]); setAcceptedIds([]);
-        setAnalytics(null); setMySwapId(null); setActiveTab('browse');
-        // Chunk 1: Reset station selections too
-        setBoardingStation(null); setDestinationStation(null);
-    };
-
-    const switchTab = (tab: TabType) => {
-        setActiveTab(tab);
-        if (tab === 'browse' && trainNo.length >= 4) handleBrowse();
-        if (tab === 'myswap') {
-            setHasNewMatch(false);
-            if (submitted && trainNo.length >= 4) handleFindMatches();
-        }
-    };
-
-    // Calculate Mesh Status Profile State
-    const connectionState = (isOnline && peerCount > 0) ? 'FULL_SYNC' : 
-                            (isOnline && peerCount === 0) ? 'CLOUD_ONLY' : 
-                            (!isOnline && peerCount > 0) ? 'P2P_ONLY' : 'ISOLATED';
-
-    return (
-        <View style={styles.container}>
-            {notification && (
-                <View style={styles.notifBanner}>
-                    <Text style={styles.notifText}>{notification}</Text>
-                    <TouchableOpacity onPress={() => setNotification(null)}>
-                        <Ionicons name="close" size={18} color="#fff" />
-                    </TouchableOpacity>
-                </View>
-            )}
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                        <Ionicons name="arrow-back" size={20} color={Colors.text.primary} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Seat Swap</Text>
-                    <View style={{ width: 42 }} />
-                </View>
-
-                {/* Train Context Header */}
-                <View style={styles.trainContextHeader}>
-                    {isEditingTrain && !submitted ? (
-                        <View style={styles.trainInputContainer}>
-                            <Text style={styles.trainInputPrompt}>Enter Train Number to See Swaps</Text>
-                            <View style={styles.trainInputFieldWrapper}>
-                                <Ionicons name="train-outline" size={20} color={Colors.text.tertiary} style={{ marginLeft: 12 }} />
-                                <TextInput
-                                    style={styles.trainInputField}
-                                    placeholder="e.g. 12423"
-                                    placeholderTextColor={Colors.text.tertiary}
-                                    value={tempTrainNo}
-                                    onChangeText={setTempTrainNo}
-                                    keyboardType="number-pad"
-                                    maxLength={5}
-                                />
-                                <TouchableOpacity 
-                                    onPress={handleSetTrain} 
-                                    disabled={tempTrainNo.length < 4}
-                                    style={[styles.trainInputGoBtn, tempTrainNo.length < 4 && { opacity: 0.5 }]}
-                                >
-                                    <Text style={styles.trainInputGoText}>Go</Text>
-                                    <Ionicons name="arrow-forward" size={16} color="#fff" />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    ) : (
-                        <View style={styles.trainPillContainer}>
-                            <View style={styles.trainPill}>
-                                <Text style={styles.trainPillEmoji}>🚄</Text>
-                                <Text style={styles.trainPillText}>Train {trainNo} • Today</Text>
-                                {!submitted && (
-                                    <TouchableOpacity 
-                                        onPress={() => {
-                                            setIsEditingTrain(true);
-                                            setTempTrainNo(trainNo);
-                                        }} 
-                                        style={styles.trainEditBtn}
-                                    >
-                                        <Ionicons name="pencil" size={14} color={Colors.primary.start} />
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        </View>
-                    )}
-                </View>
-
-                <View style={{ marginBottom: 16 }}>
-                    <MeshStatusBar connectionState={connectionState} peerCount={peerCount} />
-                </View>
-
-                <View style={styles.tabBar}>
-                    {[
-                        { key: 'browse' as TabType, label: 'Browse', icon: 'search-outline' },
-                        { key: 'register' as TabType, label: 'Register', icon: 'add-circle-outline' },
-                        { key: 'myswap' as TabType, label: 'My Swap', icon: 'swap-horizontal-outline' },
-                    ].map(tab => {
-                        const isDisabled = tab.key !== 'browse' && trainNo.length < 4;
-                        return (
-                            <TouchableOpacity 
-                                key={tab.key} 
-                                style={[styles.tab, activeTab === tab.key && styles.tabActive, isDisabled && { opacity: 0.5 }]} 
-                                disabled={isDisabled}
-                                onPress={() => switchTab(tab.key)}
-                            >
-                                <View style={{ position: 'relative' }}>
-                                    <Ionicons name={tab.icon as any} size={18} color={activeTab === tab.key ? Colors.primary.start : Colors.text.tertiary} />
-                                    {tab.key === 'myswap' && (hasNewMatch || submitted) && (
-                                        <View style={[styles.tabBadge, hasNewMatch ? { backgroundColor: Colors.danger.start } : { backgroundColor: Colors.success.start }]} />
-                                    )}
-                                </View>
-                                <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive, isDisabled && { color: Colors.text.tertiary }]}>{tab.label}</Text>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
-
-                {activeTab === 'browse' && (
-                    <BrowseTab 
-                        trainNo={trainNo} browseLoading={browseLoading} hasBrowsed={hasBrowsed}
-                        offers={offers} analytics={analytics} 
-                        onBrowse={handleBrowse} onSwitchToRegister={() => setActiveTab('register')}
-                    />
-                )}
-                {activeTab === 'register' && (
-                    <RegisterTab 
-                        submitted={submitted} coachId={coachId} seatNo={seatNo} currentType={currentType}
-                        desiredType={desiredType} reason={reason} loading={loading} isFormValid={!!isFormValid}
-                        boardingStation={boardingStation} destinationStation={destinationStation}
-                        onCoachIdChange={setCoachId} onSeatNoChange={setSeatNo} onCurrentTypeChange={setCurrentType}
-                        onDesiredTypeChange={setDesiredType} onReasonChange={setReason}
-                        onBoardingStationChange={setBoardingStation}
-                        onDestinationStationChange={setDestinationStation}
-                        onSubmit={handleSubmit}
-                        onGoToMySwap={() => setActiveTab('myswap')}
-                    />
-                )}
-                {activeTab === 'myswap' && (
-                    <>
-                        {/* Chunk 2: Live Speedometer shown when swap is active */}
-                        {submitted && <Speedometer peerCount={peerCount} />}
-                        <MySwapTab 
-                            submitted={submitted} mySwapId={mySwapId} activeSwapObj={activeSwapObj}
-                            matchedPartnerObj={matchedPartnerObj} isAccepted={!!isAccepted} peerCount={peerCount}
-                            matchLoading={matchLoading} matches={matches} acceptedIds={acceptedIds}
-                            onCancelSwap={handleCancelSwap} onFindMatches={handleFindMatches} onAcceptSwap={handleAcceptSwap}
-                            onGoToRegister={() => setActiveTab('register')}
-                            onCompleteSwap={handleCompleteSwap}
-                            onReportProblem={handleReportProblem}
-                        />
-                    </>
-                )}
-            </ScrollView>
-        </View>
-    );
+  const [train,setTrain] = useState('');
+  const [date,setDate] = useState(indiaDate);
+  const [journey,setJourney] = useState<{train:string;date:string}>();
+  const [snapshot,setSnapshot] = useState<Snapshot>({records:[],outbox:[],blocked:[],errors:{}});
+  const [owner,setOwner] = useState('');
+  const [status,setStatus] = useState<ConnectionStatus>({nearby:0,nearbyReady:false,cloud:false,message:''});
+  const [busy,setBusy] = useState(false);
+  const [coach,setCoach] = useState('');
+  const [seat,setSeat] = useState('');
+  const [from,setFrom] = useState('');
+  const [to,setTo] = useState('');
+  const [targetCoach,setTargetCoach] = useState('');
+  const [travelClass,setClass] = useState<TravelClass>('SL');
+  const [berth,setBerth] = useState<Berth>('UPPER');
+  const [wanted,setWanted] = useState<Berth>('LOWER');
+  const [rules,setRules] = useState(false);
+  const connection = useRef<Awaited<ReturnType<typeof connect>> | null>(null);
+  const refresh = useCallback(async () => {
+    const ctx = await exchange(); setOwner(ctx.key.owner); setSnapshot(await ctx.store.snapshot());
+  },[]);
+  const run = async (fn: () => Promise<unknown>) => {
+    if (busy) return; setBusy(true);
+    try { await fn(); await refresh(); connection.current?.retry(); }
+    catch (e) { Alert.alert('Please check',e instanceof Error ? e.message : 'The action failed. Please retry.'); }
+    finally { setBusy(false); }
+  };
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    void (async () => {
+      const ctx = await exchange();
+      const s = await ctx.store.snapshot();
+      if (!alive) return;
+      setOwner(ctx.key.owner); setSnapshot(s);
+      if (!journey) {
+        const active = s.records.map(r => r.offer).find(o => o.owner === ctx.key.owner && o.expires > Date.now() && ['OPEN','ACCEPTED'].includes(o.state));
+        if (active) { setTrain(active.train); setDate(active.date); setJourney({train:active.train,date:active.date}); }
+        return;
+      }
+      const link = await connect(journey.train,journey.date,s => { if (alive) { setStatus(s); void refresh().catch(() => undefined); } });
+      if (alive) connection.current = link; else await link.stop();
+    })().catch(e => { if (alive) Alert.alert('Connection unavailable',e.message); });
+    const timer = setInterval(() => { if (AppState.currentState === 'active') void refresh().catch(() => undefined); },5000);
+    return () => { alive = false; clearInterval(timer); const link = connection.current; connection.current = null; void link?.stop().catch(() => undefined); };
+  },[journey,refresh]));
+  const offers = snapshot.records.map(r => r.offer).filter(o => o.train === journey?.train && o.date === journey?.date);
+  const mine = offers.filter(o => o.owner === owner).sort((a,b) => b.created-a.created)[0];
+  const partner = mine && offers.find(o => o.id === mine.partner);
+  const state = mine ? exchangeState(mine,partner) : null;
+  const active = mine && !['FAILED','EXPIRED','COMPLETED'].includes(state!);
+  const matches = mine ? offers.filter(o => !snapshot.blocked.includes(o.owner) && compatible(mine,o) && o.expires > Date.now() &&
+    (o.state === 'OPEN' || (o.state === 'ACCEPTED' && o.partner === mine.id))) : [];
+  const button = (label: string,fn: () => void,disabled = busy) => <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={fn} style={[styles.button,disabled && {opacity:0.5}]}><Text style={styles.buttonText}>{label}</Text></Pressable>;
+  const field = (label: string,value: string,set: (x:string)=>void,maxLength:number,numeric=false) => <View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={v => set(v.toUpperCase())} maxLength={maxLength} autoCapitalize="characters" autoCorrect={false} keyboardType={numeric ? 'number-pad':'default'} style={styles.input}/></View>;
+  const choice = <T extends string,>(title:string,options:readonly T[],value:T,set:(v:T)=>void) => <View><Text style={styles.label}>{title}</Text><View style={styles.choices}>{options.map(o => <Pressable key={o} accessibilityRole="radio" accessibilityState={{checked:value===o}} accessibilityLabel={title+': '+o.replace(/_/g,' ')} onPress={() => set(o)} style={[styles.chip,value===o && styles.selected]}><Text style={{color:value===o?'#fff':'#28313D'}}>{o.replace(/_/g,' ')}</Text></Pressable>)}</View></View>;
+  async function post() {
+    if (!journey || !rules) throw new Error('Join a journey and agree to the usage rules first.');
+    const ctx = await exchange();
+    await ctx.store.create({id:await ctx.key.newId(),train:journey.train,date:journey.date,coach,seat:Number(seat),berth,wanted,travelClass,from,to,targetCoach});
+  }
+  function accept(other: Offer) {
+    Alert.alert('Confirm your consent',`Exchange ${mine!.coach}/${mine!.seat} with ${other.coach}/${other.seat}? Verify tickets and agree in person. Your partner must also accept in their app.`,[
+      {text:'Not now',style:'cancel'},{text:'I agree',onPress:() => { void run(async () => (await exchange()).store.act(mine!.id,'ACCEPT',other.id)); }},
+    ]);
+  }
+  return <SafeAreaView style={styles.safe}><KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+    {button('Back',() => router.back(),false)}
+    <Text accessibilityRole="header" style={styles.title}>Find a seat exchange</Text>
+    <Text style={styles.copy}>Two passengers. Two independent confirmations. Keep this screen open on both phones; there are no background alerts.</Text>
+    <View style={styles.card}>
+      <Text style={styles.heading}>Your train service</Text>
+      {field('Train number (5 digits)',train,setTrain,5,true)}
+      {field('Service start date (YYYY-MM-DD)',date,setDate,10)}
+      <Text style={styles.copy}>Use the date the train starts its service, including when you board after midnight.</Text>
+      {button('Join journey',() => {
+        if (!/^\d{5}$/.test(train) || !calendarDate(date)) { Alert.alert('Invalid journey','Enter a 5-digit train number and a real YYYY-MM-DD date.'); return; }
+        if (active && (mine.train!==train || mine.date!==date)) { Alert.alert('Active offer','Cancel your offer before changing journeys.'); return; }
+        setJourney({train,date});
+      })}
+    </View>
+    {journey && <>
+      <View style={styles.card}>
+        <Text style={styles.heading}>{journey.train} · {journey.date}</Text>
+        <Text style={styles.copy}>Nearby connections: {status.nearby} · {status.nearbyReady?'Radio ready':'Radio unavailable'}</Text>
+        <Text style={styles.copy}>Cloud: {status.cloud?'Connected':'Not connected'} · Pending cloud updates: {snapshot.outbox.length}</Text>
+        {!!status.message && <Text accessibilityLiveRegion="polite" style={styles.warning}>{status.message}</Text>}
+        {!!status.nearbyMessage && <Text style={styles.warning}>{status.nearbyMessage}</Text>}
+        <Text style={styles.copy}>Nearby discovery uses Bluetooth/Wi-Fi and requires location/nearby permissions. This release does not read or upload GPS coordinates. Offline exchange needs another compatible nearby app user.</Text>
+        {button('Retry sync',() => connection.current?.retry())}
+      </View>
+      {mine && <View style={styles.card}>
+        <Text style={styles.heading}>Your offer: {mine.coach} / {mine.seat}</Text>
+        <Text accessibilityLiveRegion="polite" style={styles.heading}>{labels[state!]}</Text>
+        <Text style={styles.copy}>{mine.travelClass} · {mine.from} → {mine.to} · {mine.berth.replace(/_/g,' ')} → {mine.wanted.replace(/_/g,' ')}</Text>
+        {!!partner && <Text style={styles.copy}>Passenger: {partner.coach} / {partner.seat}. Verify their ticket and the permitted exchange before moving.</Text>}
+        {!!partner && button('Block this passenger',() => { void run(async () => {
+          if (mine.state==='ACCEPTED') await (await exchange()).store.act(mine.id,'CANCEL');
+          const sent = await reportAndBlock(partner.owner);
+          Alert.alert('Passenger blocked',sent?'Report submitted.':'Report could not be sent; contact support when online.');
+        }); })}
+        {!!snapshot.errors[mine.id] && <Text style={styles.warning}>Cloud has not confirmed this update: {snapshot.errors[mine.id]}</Text>}
+        {(state==='BOTH_ACCEPTED' || state==='COMPLETING') && mine.state!=='COMPLETED' && button('Confirm exchange completed',() => { void run(async () => (await exchange()).store.act(mine.id,'COMPLETE')); })}
+        {!['CANCELLED','COMPLETED'].includes(mine.state) && button('Cancel / decline / report a problem',() => Alert.alert('Cancel this offer?','Both phones will see cancellation after their next successful sync. You can create a new offer afterwards.',[{text:'Keep offer',style:'cancel'},{text:'Cancel offer',style:'destructive',onPress:() => { void run(async () => (await exchange()).store.act(mine.id,'CANCEL')); }}]))}
+        {state==='WAITING' && <Text style={styles.copy}>The passenger must open their matching offer and tap “I agree”. Until then, this is only a request, not a completed swap.</Text>}
+      </View>}
+      {!active && <View style={styles.card}>
+        <Text style={styles.heading}>Post your own ticketed seat</Text>
+        {choice('Travel class',CLASSES,travelClass,setClass)}
+        {field('Coach (for example S1, B2, A1, M1)',coach,setCoach,3)}
+        {field('Seat number',seat,setSeat,2,true)}
+        {choice('Current berth',BERTHS,berth,setBerth)}
+        {choice('Wanted berth',BERTHS,wanted,setWanted)}
+        {field('Boarding station code',from,setFrom,5)}
+        {field('Destination station code',to,setTo,5)}
+        {field('Preferred coach (optional)',targetCoach,setTargetCoach,3)}
+        <Text style={styles.copy}>V1 supports SL, 3A, 3E and 2A, and matches identical boarding/destination segments only. Seat details are self-reported, not railway-verified. Same-berth swaps are allowed.</Text>
+        <Pressable accessibilityRole="checkbox" accessibilityState={{checked:rules}} onPress={() => setRules(!rules)} style={styles.chip}><Text>{rules?'☑':'☐'} I own this ticketed seat, will not post fake offers or abuse passengers, and accept the terms and privacy policy.</Text></Pressable>
+        {button('Read terms',() => router.push('/terms'),false)}
+        {button('Read privacy policy',() => router.push('/privacy'),false)}
+        {button('Post offer',() => { void run(post); },busy || !rules)}
+      </View>}
+      {mine?.state==='OPEN' && <View style={styles.card}>
+        <Text style={styles.heading}>Compatible passengers</Text>
+        {matches.length===0 && <Text style={styles.copy}>No compatible passengers found. Ask another willing passenger to open RailMitra and join the same train service/date. Both ticket segments and berth preferences must match.</Text>}
+        {matches.map(other => <View key={other.id} style={styles.match}>
+          <Text style={styles.heading}>{other.coach} / {other.seat} · {other.berth.replace(/_/g,' ')}</Text>
+          <Text style={styles.copy}>{other.partner===mine.id?'This passenger has requested your seat. Your independent consent is required.':'Offer available'}</Text>
+          {button('Agree to this exchange',() => accept(other))}
+          {button('Report / block passenger',() => { void run(async () => {
+            const sent = await reportAndBlock(other.owner);
+            Alert.alert('Passenger blocked',sent?'Your report was sent for review.':'Blocked on this phone. The report could not be sent; retry when online through support.');
+          }); })}
+        </View>)}
+      </View>}
+    </>}
+    <Text style={styles.copy}>RailMitra does not modify your official reservation and is not affiliated with Indian Railways or IRCTC. Follow railway staff instructions. No payments or free-text chat are supported.</Text>
+  </ScrollView></KeyboardAvoidingView></SafeAreaView>;
 }
+const styles = StyleSheet.create({
+  safe:{flex:1,backgroundColor:'#FFF8F3'},content:{padding:20,gap:16,paddingBottom:40},title:{fontSize:28,fontWeight:'700',color:'#28313D'},
+  heading:{fontSize:19,fontWeight:'700',color:'#28313D'},copy:{fontSize:16,lineHeight:24,color:'#475569'},
+  card:{backgroundColor:'#fff',padding:18,borderRadius:16,gap:14,borderWidth:1,borderColor:'#E6DCD5'},
+  label:{fontSize:16,fontWeight:'600',color:'#28313D',marginBottom:8},field:{gap:2},
+  input:{minHeight:48,borderWidth:1,borderColor:'#667085',borderRadius:8,padding:12,fontSize:17,color:'#28313D'},
+  button:{minHeight:48,padding:14,borderRadius:10,backgroundColor:'#A83D16',justifyContent:'center'},buttonText:{fontSize:16,fontWeight:'600',color:'#fff',textAlign:'center'},
+  choices:{flexDirection:'row',flexWrap:'wrap',gap:8},chip:{minHeight:48,padding:12,borderWidth:1,borderColor:'#667085',borderRadius:8,justifyContent:'center'},selected:{backgroundColor:'#A83D16'},
+  warning:{fontSize:16,color:'#9C241C'},match:{gap:10,borderTopWidth:1,borderTopColor:'#E6DCD5',paddingTop:14},
+});

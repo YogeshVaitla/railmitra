@@ -13,6 +13,8 @@
     },
     "android": {
       "package": "com.railmitra.app",
+      "allowBackup": false,
+      "blockedPermissions": ["android.permission.ACCESS_BACKGROUND_LOCATION", "android.permission.RECORD_AUDIO", "android.permission.SYSTEM_ALERT_WINDOW", "android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"],
       "adaptiveIcon": {
         "backgroundColor": "#FFF8F3",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -53,12 +55,14 @@
         }
       ],
       "expo-font",
-      "expo-localization",
+      "expo-secure-store",
       "./plugins/withNearbyConnections",
       [
         "expo-build-properties",
         {
           "android": {
+            "targetSdkVersion": 36,
+            "compileSdkVersion": 36,
             "newArchEnabled": true
           },
           "ios": {

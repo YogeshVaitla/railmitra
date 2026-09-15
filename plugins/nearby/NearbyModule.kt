@@ -42,22 +42,28 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
 
     // Track connected endpoints
     private val connectedEndpoints = mutableMapOf<String, String>() // endpointId -> endpointName
-    private val pendingPayloads = mutableMapOf<String, String>() // for endpoints not yet connected
+    private val discoveredNames = mutableMapOf<String, String>()
+    private val connecting = mutableSetOf<String>()
 
     // --- Connection Lifecycle ---
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            Log.d(TAG, "Connection initiated with $endpointId (${info.endpointName})")
-            // Auto-accept all connections for simplicity
+            if (!connecting.contains(endpointId) && connectedEndpoints.size + connecting.size >= 8) {
+                connectionsClient.rejectConnection(endpointId)
+                return
+            }
+            discoveredNames[endpointId] = info.endpointName
+            connecting.add(endpointId)
+            // Transport admission is not application authorization. V2 verifies every signed record.
             connectionsClient.acceptConnection(endpointId, payloadCallback)
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            connecting.remove(endpointId)
             when (result.status.statusCode) {
                 ConnectionsStatusCodes.STATUS_OK -> {
-                    val name = connectedEndpoints[endpointId] ?: "unknown"
-                    Log.d(TAG, "Connected to $endpointId ($name)")
+                    connectedEndpoints[endpointId] = discoveredNames[endpointId] ?: "RailMitra"
                     sendEvent("onConnectionResult", Arguments.createMap().apply {
                         putString("endpointId", endpointId)
                         putString("status", "CONNECTED")
@@ -79,8 +85,9 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
         }
 
         override fun onDisconnected(endpointId: String) {
-            Log.d(TAG, "Disconnected from $endpointId")
             connectedEndpoints.remove(endpointId)
+            discoveredNames.remove(endpointId)
+            connecting.remove(endpointId)
             sendEvent("onEndpointLost", Arguments.createMap().apply {
                 putString("endpointId", endpointId)
             })
@@ -94,8 +101,9 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            Log.d(TAG, "Endpoint found: $endpointId (${info.endpointName})")
-            connectedEndpoints[endpointId] = info.endpointName
+            if (connectedEndpoints.containsKey(endpointId) || connecting.contains(endpointId) || connectedEndpoints.size + connecting.size >= 8) return
+            discoveredNames[endpointId] = info.endpointName
+            connecting.add(endpointId)
 
             sendEvent("onEndpointFound", Arguments.createMap().apply {
                 putString("endpointId", endpointId)
@@ -108,19 +116,14 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
                     Log.d(TAG, "Connection request sent to $endpointId")
                 }
                 .addOnFailureListener { e ->
-                    Log.w(TAG, "Connection request failed to $endpointId: ${e.message}")
+                    connecting.remove(endpointId)
+                    discoveredNames.remove(endpointId)
                 }
         }
 
         override fun onEndpointLost(endpointId: String) {
-            Log.d(TAG, "Endpoint lost: $endpointId")
-            connectedEndpoints.remove(endpointId)
-            sendEvent("onEndpointLost", Arguments.createMap().apply {
-                putString("endpointId", endpointId)
-            })
-            sendEvent("onPeerCountChanged", Arguments.createMap().apply {
-                putInt("count", connectedEndpoints.size)
-            })
+            // Discovery loss does not mean an established connection was lost.
+            if (!connectedEndpoints.containsKey(endpointId)) discoveredNames.remove(endpointId)
         }
     }
 
@@ -129,8 +132,9 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
             if (payload.type == Payload.Type.BYTES) {
-                val data = String(payload.asBytes()!!, Charsets.UTF_8)
-                Log.d(TAG, "Payload received from $endpointId: ${data.take(100)}...")
+                val bytes = payload.asBytes() ?: return
+                if (bytes.size > 4096) return
+                val data = String(bytes, Charsets.UTF_8)
                 sendEvent("onPayloadReceived", Arguments.createMap().apply {
                     putString("endpointId", endpointId)
                     putString("data", data)
@@ -188,6 +192,10 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun sendPayload(data: String, promise: Promise) {
+        if (data.toByteArray(Charsets.UTF_8).size > 4096) {
+            promise.reject("PAYLOAD_TOO_LARGE", "Payload exceeds 4096 bytes")
+            return
+        }
         val payload = Payload.fromBytes(data.toByteArray(Charsets.UTF_8))
         val endpoints = connectedEndpoints.keys.toList()
 
@@ -208,6 +216,17 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
+    fun sendPayloadToEndpoint(endpointId: String, data: String, promise: Promise) {
+        if (!connectedEndpoints.containsKey(endpointId) || data.toByteArray(Charsets.UTF_8).size > 4096) {
+            promise.reject("INVALID_PAYLOAD", "Endpoint unavailable or payload too large")
+            return
+        }
+        connectionsClient.sendPayload(endpointId, Payload.fromBytes(data.toByteArray(Charsets.UTF_8)))
+            .addOnSuccessListener { promise.resolve(true) }
+            .addOnFailureListener { e -> promise.reject("SEND_FAILED", "Nearby send failed", e) }
+    }
+
+    @ReactMethod
     fun stopAll(promise: Promise) {
         try {
             connectionsClient.stopAdvertising()
@@ -216,6 +235,8 @@ class NearbyModule(private val reactContext: ReactApplicationContext) :
             isAdvertising = false
             isDiscovering = false
             connectedEndpoints.clear()
+            discoveredNames.clear()
+            connecting.clear()
             Log.d(TAG, "All connections stopped")
             promise.resolve(true)
         } catch (e: Exception) {

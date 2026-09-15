@@ -1,50 +1,45 @@
-# Welcome to your Expo app 👋
+# RailMitra
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+RailMitra V1 coordinates a voluntary seat exchange between two Android passengers. Both phones independently sign acceptance; the exchange is complete only after both phones confirm it. The app does not alter railway reservations and is not affiliated with Indian Railways or IRCTC.
 
-## Get started
+## Supported release scope
 
-1. Install dependencies
+- Direct two-passenger swaps in SL, 3A, 3E and 2A
+- Same train number, service date, class and identical ticket segments
+- Berth preference and optional target coach, including same-berth coach swaps
+- Foreground nearby Bluetooth/Wi-Fi exchange plus optional HTTPS cloud sync
+- Signed installation identity, replay-safe cancellation, retry queue, report/block and data deletion
 
-   ```bash
-   npm install
-   ```
+The release does not include PNR verification, ticket booking, vacancy/toilet demos, family optimization, multi-person cycles, chat, GPS tracking, background alerts, payments or iOS support.
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Local checks
 
 ```bash
-npm run reset-project
+npm ci --ignore-scripts
+npm run lint
+npx tsc --noEmit
+npm test -- --runInBand
+node scripts/check-secrets.cjs
+npx expo prebuild --platform android --no-install
+node scripts/check-native.cjs
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+The server requires PostgreSQL. Copy `server/.env.example` to an untracked local `.env`, use a disposable `railmitra_test` database for integration tests, and run:
 
-## Learn more
+```bash
+cd server
+npm ci --ignore-scripts
+npm run build
+npx prisma migrate deploy
+TEST_DATABASE_URL=postgresql://railmitra_test:test_password@localhost:5432/railmitra_test npm test -- --runInBand
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+For app builds, configure `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_PRIVACY_URL` and `EXPO_PUBLIC_SUPPORT_EMAIL` in distinct preview/production EAS environments. Production configuration fails if these public values are missing or use placeholders. Configure `DATABASE_URL`, `DIRECT_URL`, a random `ADMIN_TOKEN`, `TRUST_PROXY_HOPS=1` and release version metadata in the server secret manager.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Deployment
 
-## Join the community
+Automatic backend deployment is disabled. The manual production workflow runs all client, PostgreSQL, Docker and Android gates, requests deployment of the exact reviewed main-branch commit, and verifies that exact commit from `/api/health`. `pre-prod` is for staging and review. See `docs/supabase_migration_guide.md` before applying migrations to an existing database.
 
-Join our community of developers creating universal apps.
+## Release responsibility
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Source checks cannot complete external Play Console work or validate physical radios. Before submission, complete every unchecked item in `PLAY_RELEASE_STATUS.md`. Never reuse credentials previously committed to this repository; rotate them with the provider and review access logs.
